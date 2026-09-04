@@ -36,6 +36,11 @@ build/
 # Logs
 *.log
 logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # Sistema operativo
 .DS_Store
@@ -56,3 +61,19 @@ Pag web/
 PSR - Backend/Otros/
 PSR - Backend/bd/
 PSR - Backend/.idea/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Otros editores
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Docs contextuales
+docs/
