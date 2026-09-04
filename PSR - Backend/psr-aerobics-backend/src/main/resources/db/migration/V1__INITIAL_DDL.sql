@@ -42,25 +42,15 @@ CREATE TABLE rol (
 -- PERSONA --
 CREATE TABLE persona (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tipo_documento tipo_documento_enum,
-    documento_identidad VARCHAR(20),
-    nombre VARCHAR(100),
-    apellidos VARCHAR(100),
-    telefono VARCHAR(20),
+    tipo_documento tipo_documento_enum NOT NULL,
+    numero_documento VARCHAR(20) NOT NULL,
+    nombre VARCHAR(100) NOT NULL,
+    apellidos VARCHAR(100) NOT NULL,
+    telefono VARCHAR(20) NOT NULL,
     fuente_registro fuente_registro_enum NOT NULL,
     fecha_registro TIMESTAMPTZ NOT NULL DEFAULT now(),
     activo BOOLEAN NOT NULL DEFAULT true,
-    eliminado BOOLEAN NOT NULL DEFAULT false,
-
-    CONSTRAINT uq_persona_documento UNIQUE (documento_identidad),
-    CONSTRAINT chk_persona_datos_si_no_eliminado CHECK (
-        eliminado = true OR (tipo_documento IS NOT NULL AND documento_identidad IS NOT NULL AND
-                                            nombre IS NOT NULL AND apellidos IS NOT NULL AND telefono IS NOT NULL
-                                 )
-        ),
-    CONSTRAINT chk_persona_eliminado_implica_inactivo CHECK (
-        eliminado = false OR activo = false
-        )
+    CONSTRAINT uq_persona_documento UNIQUE (numero_documento)
 );
 
 -- CONTACTO_EMERGENCIA --
@@ -78,14 +68,14 @@ CREATE TABLE contacto_emergencia (
 -- USUARIO --
 CREATE TABLE usuario (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    documento_identidad VARCHAR(20) UNIQUE,
+    numero_documento VARCHAR(20) UNIQUE,
     correo VARCHAR(150) UNIQUE,
     password_hash TEXT NOT NULL,
     persona_id INTEGER REFERENCES persona(id),
     activo BOOLEAN NOT NULL DEFAULT true,
     fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT chk_usuario_identificador CHECK (documento_identidad IS NOT NULL OR correo IS NOT NULL)
+    CONSTRAINT chk_usuario_identificador CHECK (numero_documento IS NOT NULL OR correo IS NOT NULL)
 );
 CREATE INDEX idx_usuario_persona ON usuario (persona_id);
 
@@ -95,7 +85,8 @@ CREATE TABLE usuario_rol (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     usuario_id INTEGER NOT NULL REFERENCES usuario(id) ON DELETE CASCADE,
     rol_id INTEGER NOT NULL REFERENCES rol(id),
-    asignado_en TIMESTAMPTZ NOT NULL DEFAULT now()
+    asignado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_usuario_rol UNIQUE (usuario_id, rol_id)
 );
 CREATE INDEX idx_usuario_rol_rol ON usuario_rol (rol_id);
 
@@ -138,14 +129,16 @@ CREATE UNIQUE INDEX uq_sesion_horario_fecha ON sesion (horario_id, fecha) WHERE 
 CREATE INDEX idx_sesion_fecha ON sesion (fecha);
 
 -- LLEGADA --
+-- Única por (persona, sesion), no por (persona, fecha), ya que un mismo día puede tener más de una sesión válida.
 CREATE TABLE llegada (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     persona_id INTEGER NOT NULL REFERENCES persona(id),
     sesion_id INTEGER NOT NULL REFERENCES sesion(id),
     hora_llegada TIMESTAMPTZ NOT NULL DEFAULT now(),
-    metodo_checkin  metodo_checkin_enum NOT NULL,
-    CONSTRAINT uq_llegada_persona_sesion UNIQUE (persona_id, sesion_id)
+    metodo_checkin metodo_checkin_enum NOT NULL
 );
+-- Excluye a la persona sentinel (id 999999999): acumula llegadas de todas las personas eliminadas, así que puede repetirse en una misma sesión.
+CREATE UNIQUE INDEX uq_llegada_persona_sesion ON llegada (persona_id, sesion_id) WHERE persona_id <> 999999999;
 CREATE INDEX idx_llegada_persona ON llegada (persona_id);
 CREATE INDEX idx_llegada_sesion ON llegada (sesion_id);
 
@@ -244,4 +237,12 @@ INSERT INTO tarifa (id, monto) VALUES (1, 4000);
 INSERT INTO configuracion_cola (id, personas_por_turno) VALUES (1, 1);
 INSERT INTO metodo_pago (nombre) VALUES ('EFECTIVO'), ('TRANSFERENCIA');
 
+-- Persona y usuario sentinel (id fijo 999999999) — objetivo: sp_eliminar_persona: conserva el hecho de registros necesarios
+INSERT INTO persona (id, tipo_documento, numero_documento, nombre, apellidos, telefono, fuente_registro, activo)
+    OVERRIDING SYSTEM VALUE
+VALUES (999999999, 'CC', 'SENTINEL-DELETED-000', 'Usuario', 'Eliminado', '0000000000', 'ADMIN', false);
+
+INSERT INTO usuario (id, numero_documento, correo, password_hash, persona_id, activo)
+    OVERRIDING SYSTEM VALUE
+VALUES (999999999, 'SENTINEL-DELETED-000', 'sentinel-deleted@psr.local', '!SENTINEL_NO_LOGIN_POSSIBLE!', 999999999, false);
 
