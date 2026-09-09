@@ -1,0 +1,79 @@
+# Maven / Spring Boot
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Spring Tool Suite
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+
+# VS Code
+.vscode/
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Temporales
+*.tmp
+*.temp
+
+# Material externo al backend
+Otros/
+Pag web/
+
+# Material externo del backend
+PSR - Backend/Otros/
+PSR - Backend/bd/
+PSR - Backend/.idea/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Otros editores
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Docs contextuales
+docs/
