@@ -22,6 +22,15 @@ export const queueService = {
     return await apiClient.post("/api/cola", { personId });
   },
 
+  checkinPropio: async () => {
+    // Sin cuerpo — la persona sale del token, no hay nada que mandar ni que falsificar.
+    // Autorizado solo para MEMBER. `POST /api/cola` (arriba) recibe `personId` en el cuerpo y
+    // por eso sigue cerrado a ese rol a propósito: si se le diera acceso, cualquier miembro
+    // podría marcarle la llegada a otra persona cambiando ese número
+    // (NOTAS-PARA-FRONTEND.md §1). Responde 201 con el mismo CheckinResponse, queuePosition real.
+    return await apiClient.post("/api/checkin/propio");
+  },
+
   checkinManual: async (personId) => {
     // CheckinRequest: { personId } — registro manual desde recepción
     return await apiClient.post("/api/checkin/manual", { personId });

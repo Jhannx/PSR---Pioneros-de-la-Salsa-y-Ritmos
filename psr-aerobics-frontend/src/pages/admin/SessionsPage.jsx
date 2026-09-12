@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plus, X, Ban, Users, CheckCircle2 } from "lucide-react";
-import { formatShortWeekdayDate as formatDate } from "../../utils/date";
+import { formatShortWeekdayDate as formatDate, formatTimeOfDay, toOffsetDateTime } from "../../utils/date";
 import { useMockData } from "../../context/DataContext";
 import { userService } from "../../services/userService";
 
@@ -53,12 +53,23 @@ export default function SessionsPage() {
   async function handleCreateSession() {
     if (!date.trim()) return;
     setFormError("");
+    // El backend rechaza esto con un 500 crudo (violación del constraint `chk_sesion_horas`,
+    // ver errores-nuevo-compartido.md #1) en vez de un mensaje claro — se valida acá antes de
+    // llegar a ese camino.
+    if (endTime <= startTime) {
+      setFormError("La hora de fin debe ser posterior a la hora de inicio.");
+      return;
+    }
     setCreating(true);
     try {
       await createSession({
         date,
-        startTime: `${date}T${startTime}:00`,
-        endTime: `${date}T${endTime}:00`,
+        // `startTime`/`endTime` son OffsetDateTime en el backend, no LocalDateTime — el error
+        // "cuerpo de la solicitud JSON inválido" (errores-frontend.md #4) era justamente que
+        // faltaba el offset de zona horaria (NOTAS-PARA-FRONTEND.md §1); sin él, Jackson ni
+        // siquiera llega a deserializar el resto del cuerpo.
+        startTime: toOffsetDateTime(date, startTime),
+        endTime: toOffsetDateTime(date, endTime),
         // Se omite la clave por completo si no hay profesor: es opcional en el contrato,
         // y mandar `null` explícito rompe la deserialización si el campo del lado del
         // backend está tipado como primitivo (int) en vez de Integer.
@@ -136,7 +147,7 @@ export default function SessionsPage() {
                     </div>
 
                     <h3 className="text-xl font-bold text-white mb-1">
-                      {session.startTime} - {session.endTime}
+                      {formatTimeOfDay(session.startTime)} - {formatTimeOfDay(session.endTime)}
                     </h3>
                     <p className="text-sm text-neutral-400 mb-4">
                       Profesor(a): <span className="text-neutral-200">{teacher}</span>

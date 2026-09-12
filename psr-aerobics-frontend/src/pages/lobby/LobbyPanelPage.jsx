@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Monitor, UserPlus, Tv, ArrowRight } from "lucide-react";
+import { Monitor, UserPlus, Tv, QrCode, ArrowRight } from "lucide-react";
 
 const PANEL_OPTIONS = [
   {
@@ -7,6 +7,12 @@ const PANEL_OPTIONS = [
     label: "Ingreso por Documento",
     description: "Pantalla de check-in donde la persona digita su documento para hacer fila.",
     icon: Monitor,
+  },
+  {
+    path: "/lobby/qr",
+    label: "Ingreso por QR",
+    description: "Código QR para que la persona marque su asistencia desde su propio celular.",
+    icon: QrCode,
   },
   {
     path: "/lobby/register",
@@ -35,7 +41,7 @@ export default function LobbyPanelPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {PANEL_OPTIONS.map((option) => {
             const Icon = option.icon;
             return (

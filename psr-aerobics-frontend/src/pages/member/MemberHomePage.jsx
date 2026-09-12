@@ -1,19 +1,32 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, UserCheck } from "lucide-react";
+import { CheckCircle2, UserCheck, Cake } from "lucide-react";
 import { getInitialsFromFullName } from "../../utils/text";
+import { formatCOP } from "../../utils/currency";
+import { formatBirthDate } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
 import { useMockData } from "../../context/DataContext";
 import { peopleService } from "../../services/peopleService";
+import { paymentsService } from "../../services/paymentsService";
+import { queueService } from "../../services/queueService";
 
 const WEEK_DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
 export default function MemberHomePage() {
   const { user } = useAuth();
-  const { queue, addToQueue } = useMockData();
-  const [markedLocally, setMarkedLocally] = useState(false);
+  const { queue } = useMockData();
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState("");
   const [checkingIn, setCheckingIn] = useState(false);
+  // Resultado de POST /api/checkin/propio — turno real que devuelve el backend. Antes el botón
+  // llamaba a POST /api/cola con { personId }, que para un MIEMBRO da 403 a propósito: ese
+  // endpoint recibe el personId en el cuerpo, así que abrirlo dejaría que cualquier miembro
+  // marcara la llegada de otra persona (NOTAS-PARA-FRONTEND.md §1). El endpoint correcto no
+  // recibe cuerpo — la persona sale del token.
+  const [myCheckin, setMyCheckin] = useState(null);
+  // Antes esta pantalla mostraba "$4.000" escrito a mano en el JSX — el valor por defecto del
+  // mock original, nunca conectado a la tarifa real (errores-frontend.md #5). `null` mientras
+  // carga: mostrar una cifra vieja un instante es peor que no mostrar ninguna.
+  const [pricing, setPricing] = useState(null);
 
   useEffect(() => {
     if (!user?.personId) return;
@@ -22,29 +35,35 @@ export default function MemberHomePage() {
       .catch((err) => setError(err.data?.message || err.message || "No fue posible cargar tu perfil."));
   }, [user?.personId]);
 
+  useEffect(() => {
+    paymentsService.getPricing()
+      .then((data) => setPricing(data?.amount ?? null))
+      .catch((err) => console.warn("No se pudo cargar la tarifa vigente:", err));
+  }, []);
+
   const name = profile?.fullName || user?.fullName || "Usuario";
   const initials = getInitialsFromFullName(name);
 
-  // Check if member is in today's reception queue
+  // `queue` (GET /api/cola/admin) solo responde para roles de personal — para un MIEMBRO puro
+  // llega vacía en silencio (DataContext.refreshData descarta el 403 con Promise.allSettled).
+  // Sigue siendo útil para una cuenta que además tiene rol de personal (ej. ADMIN viendo su
+  // propio panel de miembro), así que se conserva como fuente de verdad cuando está disponible.
   const memberQueueItem = queue.find((p) => p.personId === user?.personId);
   const isPaidToday = memberQueueItem ? Number(memberQueueItem.amountApplied || memberQueueItem.amountCharged || 0) > 0 : false;
-  const isAttendedToday = memberQueueItem ? memberQueueItem.attended : markedLocally;
+  const isAttendedToday = memberQueueItem ? memberQueueItem.attended : !!myCheckin;
 
   async function handleMarkAttendance() {
-    if (!user?.personId || checkingIn) return;
+    if (!user?.personId || checkingIn || memberQueueItem || myCheckin) return;
     setCheckingIn(true);
     setError("");
-    if (!memberQueueItem) {
-      try {
-        await addToQueue({ personId: user.personId, checkinMethod: "DOCUMENT" });
-      } catch (err) {
-        setError(err.data?.message || err.message || "No fue posible registrar la llegada.");
-        setCheckingIn(false);
-        return;
-      }
+    try {
+      const result = await queueService.checkinPropio();
+      setMyCheckin(result);
+    } catch (err) {
+      setError(err.data?.message || err.message || "No fue posible registrar la llegada.");
+    } finally {
+      setCheckingIn(false);
     }
-    setMarkedLocally(true);
-    setCheckingIn(false);
   }
 
   return (
@@ -71,6 +90,14 @@ export default function MemberHomePage() {
             <p className="text-xs text-neutral-400 mt-1 font-mono">
               Doc: {profile?.documentType || ""} {profile?.documentNumber || user?.documentNumber || "—"}
             </p>
+            {/* `birthDate` puede llegar null — personas registradas antes de que el campo
+                existiera no lo tienen (NOTAS-PARA-FRONTEND.md §5). Solo se muestra si hay dato. */}
+            {formatBirthDate(profile?.birthDate) && (
+              <p className="text-xs text-neutral-500 mt-1 flex items-center gap-1">
+                <Cake size={12} />
+                {formatBirthDate(profile.birthDate)}
+              </p>
+            )}
 
             {isPaidToday ? (
               <div className="mt-4 inline-flex items-center gap-1.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-3.5 py-1.5 rounded-full text-xs font-semibold">
@@ -79,7 +106,7 @@ export default function MemberHomePage() {
               </div>
             ) : (
               <div className="mt-4 inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-400 border border-amber-500/30 px-3.5 py-1.5 rounded-full text-xs font-semibold">
-                Pago de tarifa ($4.000) por registrar en recepción
+                {pricing != null ? `Pago de tarifa (${formatCOP(pricing)}) por registrar en recepción` : "Pago de tarifa por registrar en recepción"}
               </div>
             )}
           </div>
@@ -113,9 +140,16 @@ export default function MemberHomePage() {
           {/* Attendance Action */}
           <div className="mt-6 pt-4 border-t border-neutral-800">
             {isAttendedToday ? (
-              <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-2xl text-center flex items-center justify-center gap-2 font-semibold text-sm">
-                <UserCheck size={18} />
-                ¡Tu asistencia de hoy está registrada!
+              <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-2xl text-center flex flex-col items-center justify-center gap-1.5 font-semibold text-sm">
+                <span className="flex items-center gap-2">
+                  <UserCheck size={18} />
+                  ¡Tu asistencia de hoy está registrada!
+                </span>
+                {myCheckin?.queuePosition != null && (
+                  <span className="text-emerald-300/80 text-xs font-normal">
+                    Tu turno en la fila de hoy: #{myCheckin.queuePosition}
+                  </span>
+                )}
               </div>
             ) : (
               <button

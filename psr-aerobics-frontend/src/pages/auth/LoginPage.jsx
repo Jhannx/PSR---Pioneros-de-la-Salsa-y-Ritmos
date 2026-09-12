@@ -1,9 +1,17 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { LogIn, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 
 const ACADEMY_NAME = "PSR Aeróbicos";
+
+// El login responde 401 con el mismo mensaje genérico para credenciales malas, usuario
+// inexistente y cuenta desactivada — a propósito: distinguirlos convierte el login en un
+// oráculo para averiguar qué documentos y correos están registrados. La única excepción es esta
+// (NOTAS-PARA-FRONTEND.md §3): mostrar "cuenta bloqueada" SOLO cuando el backend lo confirma
+// explícitamente con este code. Nunca se deduce del texto del mensaje ni de ninguna otra señal.
+const LOCKED_ACCOUNT_CODE = "CUENTA_DESACTIVADA";
+const LOCKED_ACCOUNT_MESSAGE = "Tu cuenta está desactivada. Comunícate con recepción.";
 
 const inputClass =
   "w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors";
@@ -11,6 +19,11 @@ const inputClass =
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // `ProtectedRoute` guarda la ruta original en `state.from` al expulsar a alguien sin sesión
+  // (ej. el QR de asistencia que abre directo /member/home) — antes se ignoraba y siempre se
+  // volvía al home genérico del rol, perdiendo a dónde la persona quería llegar en realidad.
+  const from = location.state?.from;
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -30,9 +43,15 @@ export default function LoginPage() {
       const result = await login(identifier, password);
       setLoading(false);
       if (result.success) {
-        navigate("/");
+        navigate(from ? `${from.pathname}${from.search || ""}` : "/", { replace: true });
+      } else if (result.code === LOCKED_ACCOUNT_CODE) {
+        setError(result.error || LOCKED_ACCOUNT_MESSAGE);
       } else {
-        setError(result.error || "Documento/correo o contraseña incorrectos");
+        // Mensaje siempre genérico para cualquier otro caso — incluido un 401 sin `code` —
+        // sin importar qué texto haya mandado el backend. No se confía en su mensaje para
+        // decidir qué mostrar, precisamente para no reabrir el problema de enumeración de
+        // cuentas que este mecanismo existe para evitar.
+        setError("Documento/correo o contraseña incorrectos");
       }
     } catch (err) {
       setLoading(false);

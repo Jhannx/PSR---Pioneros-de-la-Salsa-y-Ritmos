@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import BirthDateField from "../../../components/forms/BirthDateField";
 
 export default function PersonFormModal({ mode = "add", person, onSave, onClose }) {
   const [firstName, setFirstName] = useState(person?.firstName || "");
@@ -8,8 +9,13 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose 
   const [documentNumber, setDocumentNumber] = useState(person?.documentNumber || person?.documento || "");
   const [phone, setPhone] = useState(person?.phone || "");
   const [email, setEmail] = useState(person?.email || "");
+  const [birthDate, setBirthDate] = useState(person?.birthDate || "");
 
-  const canSave = firstName.trim() && lastName.trim() && documentNumber.trim();
+  // Obligatorio para registros nuevos, no para editar uno existente (NOTAS-PARA-FRONTEND.md §5):
+  // las personas registradas antes de este campo no lo tienen, y no hay por qué exigírselo recién
+  // al editar cualquier otro dato suyo.
+  const canSave =
+    firstName.trim() && lastName.trim() && documentNumber.trim() && (mode === "edit" || birthDate);
 
   function handleSave() {
     if (!canSave) return;
@@ -20,6 +26,7 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose 
       documentNumber: documentNumber.trim(),
       phone: phone.trim(),
       email: email.trim() || null,
+      birthDate: birthDate || null,
     });
   }
 
@@ -104,6 +111,23 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose 
                 className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="text-neutral-400 text-xs font-semibold">
+              Fecha de nacimiento{mode === "edit" ? " (opcional)" : ""}
+            </label>
+            <BirthDateField
+              value={birthDate}
+              onChange={setBirthDate}
+              className="mt-1"
+              selectClassName="bg-neutral-950 border border-neutral-800 rounded-xl px-2 py-2.5 text-white text-sm outline-none focus:border-emerald-500"
+            />
+            {mode === "edit" && !person?.birthDate && (
+              <p className="text-neutral-600 text-[11px] mt-1">
+                Esta persona no tiene fecha de nacimiento registrada todavía.
+              </p>
+            )}
           </div>
         </div>
 

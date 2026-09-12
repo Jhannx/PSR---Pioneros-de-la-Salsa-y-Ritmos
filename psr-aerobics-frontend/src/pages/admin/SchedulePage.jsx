@@ -9,6 +9,32 @@ const DAY_LABELS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sába
 const inputClass =
   "w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors";
 
+// A partir de F2 el backend rechaza con 400 una excepción cuya fecha no caiga en el mismo día
+// de la semana que declara el horario (NOTAS-PARA-FRONTEND.md §4). El 400 es la red de
+// seguridad, no la experiencia — este date-picker no debería dejar llegar a él en uso normal.
+
+// "YYYY-MM-DD" → día ISO (1 = lunes … 7 = domingo). Se parsea como UTC a propósito: construir
+// un Date a partir de un string "YYYY-MM-DD" con el constructor normal lo interpreta en la
+// zona horaria local, y cerca de medianoche eso puede correr la fecha un día — parsear como UTC
+// y comparar en UTC evita ese desfase.
+function isoDayOfWeek(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const utcDay = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0 = domingo … 6 = sábado
+  return utcDay === 0 ? 7 : utcDay;
+}
+
+// Próxima fecha (hoy incluido) cuyo día ISO coincide con `dayOfWeek` — se usa para preseleccionar
+// el campo con un valor ya válido y para sugerir una alternativa cuando la persona elige uno que
+// no coincide.
+function nextDateForDayOfWeek(dayOfWeek) {
+  const today = new Date();
+  const from = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const fromIso = from.getUTCDay() === 0 ? 7 : from.getUTCDay();
+  const diff = (dayOfWeek - fromIso + 7) % 7;
+  from.setUTCDate(from.getUTCDate() + diff);
+  return from.toISOString().slice(0, 10);
+}
+
 export default function SchedulePage() {
   const { user } = useAuth();
   const isAdmin = user.roles.includes("ADMIN");
@@ -100,9 +126,12 @@ export default function SchedulePage() {
   }
 
   async function openExceptions(scheduleId) {
+    const schedule = schedules.find((s) => s.id === scheduleId);
     setExceptionModal(scheduleId);
     setExceptionError("");
-    setExceptionDate("");
+    // Precargado con una fecha ya válida (el próximo día de ese horario) en vez de vacío — así
+    // el caso normal es simplemente confirmar, no adivinar qué fecha sirve.
+    setExceptionDate(schedule ? nextDateForDayOfWeek(schedule.dayOfWeek) : "");
     setExceptionReason("");
     setExceptionsLoading(true);
     try {
@@ -129,6 +158,21 @@ export default function SchedulePage() {
     } catch (err) {
       setExceptionError(err.data?.message || err.message || "No se pudo declarar la excepción.");
     }
+  }
+
+  // Rechaza en el cliente cualquier fecha que no caiga en el día declarado del horario, en vez
+  // de dejar que se intente guardar y falle con el 400 del backend. Al ser un <input> controlado,
+  // no llamar a setExceptionDate acá hace que el valor "rebote" de vuelta al último válido.
+  function handleExceptionDateChange(value) {
+    if (!value || !activeSchedule || isoDayOfWeek(value) === activeSchedule.dayOfWeek) {
+      setExceptionError("");
+      setExceptionDate(value);
+      return;
+    }
+    setExceptionError(
+      `Esa fecha no es ${DAY_LABELS[activeSchedule.dayOfWeek - 1].toLowerCase()}, que es el día de este horario. ` +
+        `Por ejemplo, el ${nextDateForDayOfWeek(activeSchedule.dayOfWeek)} sí lo es.`
+    );
   }
 
   async function removeException(exceptionId) {
@@ -392,11 +436,16 @@ export default function SchedulePage() {
 
             {isAdmin && (
               <>
-                <label className="text-neutral-400 text-sm font-medium">Fecha en que no aplica</label>
+                <label className="text-neutral-400 text-sm font-medium">
+                  Fecha en que no aplica{" "}
+                  <span className="text-neutral-600 font-normal">
+                    (debe ser {DAY_LABELS[activeSchedule.dayOfWeek - 1].toLowerCase()})
+                  </span>
+                </label>
                 <input
                   type="date"
                   value={exceptionDate}
-                  onChange={(e) => setExceptionDate(e.target.value)}
+                  onChange={(e) => handleExceptionDateChange(e.target.value)}
                   className={`${inputClass} mt-1.5 mb-3`}
                 />
                 <label className="text-neutral-400 text-sm font-medium">Motivo (opcional)</label>

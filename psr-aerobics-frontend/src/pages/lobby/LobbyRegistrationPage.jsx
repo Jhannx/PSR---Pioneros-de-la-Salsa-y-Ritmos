@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CheckCircle2, CreditCard, KeyRound, ArrowLeft, Pencil, Check, Mail } from "lucide-react";
+import { CheckCircle2, CreditCard, KeyRound, ArrowLeft, Pencil, Check, Mail, Cake } from "lucide-react";
 import Field from "../../components/forms/Field";
+import BirthDateField from "../../components/forms/BirthDateField";
+import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
 import { peopleService } from "../../services/peopleService";
 import { queueService } from "../../services/queueService";
 
@@ -19,18 +21,22 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [passwordMode, setPasswordMode] = useState("documento"); // documento | propia
   const [password, setPassword] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [queuePosition, setQueuePosition] = useState(null);
+  // Panel de confirmación antes del envío final (mejoras-frontend.md §1).
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const canSubmit =
     documento.trim() &&
     firstName.trim() &&
     lastName.trim() &&
     phone.trim() &&
+    birthDate &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
   async function handleSubmit() {
@@ -45,6 +51,7 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
         lastName: lastName.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
+        birthDate,
         password: passwordMode === "documento" ? null : password,
       });
 
@@ -56,8 +63,10 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
         setQueuePosition(null);
       }
 
+      setShowConfirm(false);
       setSubmitted(true);
     } catch (err) {
+      setShowConfirm(false);
       setErrorMessage(err.data?.message || err.message || "No fue posible registrar la cuenta.");
     } finally {
       setLoading(false);
@@ -148,19 +157,26 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
               <option value="PA" className="bg-neutral-900">PA</option>
             </select>
             <span className="text-neutral-500 text-sm shrink-0">Documento</span>
-            {editingDocumento ? (
-              <input
-                autoFocus={editingDocumento}
-                inputMode="numeric"
-                value={documento}
-                onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ""))}
-                onKeyDown={(e) => e.key === "Enter" && documento.trim() && setEditingDocumento(false)}
-                placeholder="1001234567"
-                className="ml-auto flex-1 min-w-0 bg-transparent border-b border-emerald-500 text-white font-semibold text-sm text-right outline-none"
-              />
-            ) : (
-              <span className="text-white font-semibold text-sm ml-auto">{documento}</span>
-            )}
+            {/*
+              Antes había un <input> (mientras se edita) y un <span> (al confirmar) que se
+              montaban y desmontaban según `editingDocumento`. El dato nunca se perdía del
+              estado, pero visualmente el número desaparecía al confirmar (errores-frontend.md
+              #6) — el <span> no llevaba `min-w-0`, así que en pantallas angostas era el único
+              elemento de la fila que el flex podía colapsar a 0. El arreglo es que el campo no
+              se desmonte nunca: siempre es el mismo <input>, y solo cambia si es editable.
+            */}
+            <input
+              autoFocus={editingDocumento}
+              readOnly={!editingDocumento}
+              inputMode="numeric"
+              value={documento}
+              onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && documento.trim() && setEditingDocumento(false)}
+              placeholder="1001234567"
+              className={`ml-auto flex-1 min-w-0 bg-transparent border-b text-white font-semibold text-sm text-right outline-none ${
+                editingDocumento ? "border-emerald-500" : "border-transparent cursor-default"
+              }`}
+            />
             <button
               type="button"
               onClick={() => setEditingDocumento((v) => !v)}
@@ -210,6 +226,12 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
                 placeholder="correo@ejemplo.com"
                 className={inputClass}
               />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <Field label="Fecha de nacimiento" icon={<Cake size={14} />}>
+              <BirthDateField value={birthDate} onChange={setBirthDate} selectClassName={inputClass} />
             </Field>
           </div>
 
@@ -263,13 +285,22 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
         </div>
 
         <button
-          onClick={handleSubmit}
+          onClick={() => setShowConfirm(true)}
           disabled={!canSubmit || loading}
           className="w-full mt-6 bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 transition-colors text-neutral-950 font-bold text-lg py-4 rounded-2xl"
         >
           {loading ? "Guardando..." : "Guardar y entrar a la fila"}
         </button>
       </div>
+
+      {showConfirm && (
+        <RegistrationConfirmModal
+          data={{ firstName, lastName, documentType, documento, phone, email, birthDate }}
+          submitting={loading}
+          onConfirm={handleSubmit}
+          onClose={() => setShowConfirm(false)}
+        />
+      )}
     </div>
   );
 }

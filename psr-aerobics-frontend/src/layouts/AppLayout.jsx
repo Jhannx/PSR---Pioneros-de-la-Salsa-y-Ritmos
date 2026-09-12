@@ -1,28 +1,19 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { ROLE_LABELS, ROLE_BADGE_STYLES } from "../context/mockDataConstants";
-import {
-  Users,
-  UserCheck,
-  Calendar,
-  Clock,
-  BarChart3,
-  ShieldCheck,
-  Settings,
-  User,
-  PhoneCall,
-  LogOut,
-  Menu,
-  X,
-  Tv,
-  Monitor,
-  ShieldQuestion,
-} from "lucide-react";
+import { useRole } from "../context/RoleContext";
+import { ROLE_LABELS, ROLE_BADGE_STYLES, NAV_BY_ROLE, getRolesForPath } from "../constants/roles";
+import { User, PhoneCall, LogOut, Menu, X, ChevronsUpDown } from "lucide-react";
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
+  const { activeRole, availableRoles, setActiveRole } = useRole();
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Aviso breve cuando el efecto de abajo cambia el rol activo sola — antes pasaba sin ningún
+  // feedback, lo que generaba confusión sobre por qué el sidebar cambió de repente
+  // (errores-nuevo-front.md #4, síntoma 2).
+  const [roleSwitchNotice, setRoleSwitchNotice] = useState(null);
+  const autoSwitchedRef = useRef(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -31,67 +22,48 @@ export default function AppLayout() {
     navigate("/login");
   };
 
-  const getNavItems = () => {
-    if (!user || !user.roles) return [];
+  // Cambio automático de rol al entrar por URL directa (selector-rol-y-sesion.md §2,
+  // comportamiento 4): si la ruta actual pertenece a un rol que la cuenta tiene pero que no
+  // está activo ahora mismo, el rol activo cambia solo — si no, el sidebar quedaría mostrando
+  // las secciones de un rol y el contenido las de otro. `getRolesForPath` devuelve [] para
+  // rutas neutras (/profile, /emergency-contact), que no pertenecen a ningún rol en particular:
+  // esas nunca disparan un cambio. Si el rol activo ya es dueño de la ruta, tampoco se toca
+  // nada — varias rutas (ej. /reception/checkin) son de más de un rol a la vez.
+  useEffect(() => {
+    const owners = getRolesForPath(location.pathname);
+    if (owners.length === 0 || owners.includes(activeRole)) return;
+    const fallback = owners.find((role) => availableRoles.includes(role));
+    if (fallback) {
+      autoSwitchedRef.current = true;
+      setActiveRole(fallback);
+    }
+  }, [location.pathname, activeRole, availableRoles, setActiveRole]);
 
-    const items = [];
-    const roles = user.roles;
+  // Separado del efecto de arriba (que ya tiene su propio setState) para que cada efecto dispare
+  // como mucho una actualización de estado — dos en el mismo generarían un render en cascada.
+  useEffect(() => {
+    if (!autoSwitchedRef.current) return;
+    autoSwitchedRef.current = false;
+    setRoleSwitchNotice(activeRole);
+  }, [activeRole]);
 
-    // Los roles no son modos exclusivos entre los que se alterna — una persona puede ser
-    // ADMIN y PROFESOR (o cualquier combinación) a la vez, con ambas autoridades en el mismo
-    // token (ver PENDIENTES.md). Por eso cada `if` es independiente: se acumulan los accesos
-    // de todos los roles que tenga, no solo el primero que coincida.
-    if (roles.includes("ADMIN")) {
-      items.push(
-        { path: "/admin/reports", label: "Reportes - Dashboard", icon: BarChart3 },
-        { path: "/reception/checkin", label: "Sesión - Aeróbicos", icon: UserCheck },
-        { path: "/admin/people", label: "Personas registradas", icon: Users },
-        { path: "/admin/sessions", label: "Sesiones de Clase", icon: Calendar },
-        { path: "/admin/schedule", label: "Horarios Recurrentes", icon: Clock },
-        { path: "/admin/roles", label: "Roles y Accesos", icon: ShieldQuestion },
-        { path: "/admin/audit", label: "Auditoría de Actividad", icon: ShieldCheck },
-        { path: "/admin/settings", label: "Configuración", icon: Settings }
-      );
-    }
-    if (roles.includes("RECEPTIONIST")) {
-      items.push(
-        { path: "/reception/checkin", label: "Sesión - Aeróbicos", icon: UserCheck },
-        { path: "/reception/people", label: "Personas registradas", icon: Users },
-        { path: "/reception/sessions", label: "Sesiones de Clase", icon: Calendar },
-        { path: "/reception/schedule", label: "Horarios Recurrentes", icon: Clock },
-        // Único rol de staff (además de ADMIN) al que la matriz le da "Reportes de ingresos".
-        { path: "/reception/reports", label: "Reportes - Dashboard", icon: BarChart3 },
-        { path: "/reception/settings", label: "Configuración", icon: Settings }
-      );
-    }
-    if (roles.includes("TEACHER")) {
-      items.push(
-        { path: "/reception/checkin", label: "Sesión - Aeróbicos", icon: UserCheck },
-        { path: "/reception/people", label: "Personas registradas", icon: Users },
-        { path: "/reception/sessions", label: "Sesiones de Clase", icon: Calendar },
-        { path: "/reception/schedule", label: "Horarios Recurrentes", icon: Clock },
-        // La matriz le da a PROFESOR "ver" tarifa/config de cola, pero no reportes de ingresos.
-        { path: "/reception/settings", label: "Configuración", icon: Settings }
-      );
-    }
-    if (roles.includes("MEMBER")) {
-      items.push(
-        { path: "/member/home", label: "Mi Estado & Asistencia", icon: UserCheck },
-        { path: "/member/emergency-contact", label: "Contacto de Emergencia", icon: PhoneCall }
-      );
-    }
-    if (roles.includes("PSR_TERMINAL")) {
-      items.push(
-        { path: "/lobby/checkin", label: "Ingreso por Documento", icon: Monitor },
-        { path: "/lobby/register", label: "Registro Rápido", icon: User },
-        { path: "/lobby/queue", label: "Fila Pública de Espera", icon: Tv }
-      );
-    }
+  useEffect(() => {
+    if (!roleSwitchNotice) return;
+    const timer = setTimeout(() => setRoleSwitchNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [roleSwitchNotice]);
+
+  // Un solo rol activo a la vez — antes se acumulaban las secciones de TODOS los roles con `if`
+  // independientes, así que una cuenta con dos roles veía la unión sin ningún orden
+  // (errores-frontend.md #8). Ahora el sidebar pinta solo NAV_BY_ROLE[activeRole].
+  function getNavItems() {
+    if (!user) return [];
+    const items = [...(NAV_BY_ROLE[activeRole] || [])];
 
     // "Mi Perfil" y el contacto de emergencia son de cualquier persona autenticada con
-    // personId, sin importar el rol — un profesor o recepcionista también son personas.
+    // personId, sin importar el rol activo — un profesor o recepcionista también son personas.
     if (user.personId) {
-      items.push({ path: "/member/emergency-contact", label: "Contacto de Emergencia", icon: PhoneCall });
+      items.push({ path: "/emergency-contact", label: "Contacto de Emergencia", icon: PhoneCall });
     }
     items.push({ path: "/profile", label: "Mi Perfil", icon: User });
 
@@ -101,9 +73,10 @@ export default function AppLayout() {
       seen.add(item.path);
       return true;
     });
-  };
+  }
 
   const navItems = getNavItems();
+  const canSwitchRole = availableRoles.length > 1;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col md:flex-row font-body">
@@ -175,18 +148,32 @@ export default function AppLayout() {
               </div>
               <div className="overflow-hidden text-left">
                 <p className="text-xs font-semibold text-white truncate text-left">{user?.fullName || "Usuario"}</p>
-                <div className="flex flex-wrap gap-1 mt-0.5">
-                  {user?.roles?.map((role) => (
-                    <span
-                      key={role}
-                      className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
-                        ROLE_BADGE_STYLES[role] || "bg-neutral-800 text-neutral-300"
+                {/* Solo el badge del rol activo — antes se pintaban todos los roles a la vez,
+                    que es justamente la señal visual del sidebar mezclado (errores-frontend.md
+                    #8). Si hay más de un rol, el badge es un botón que abre el selector en modo
+                    "switch" sin pasar por logout (selector-rol-y-sesion.md §2). */}
+                {activeRole && (
+                  canSwitchRole ? (
+                    <button
+                      onClick={() => navigate("/seleccionar-rol")}
+                      title="Cambiar de rol"
+                      className={`mt-0.5 inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full border transition-opacity hover:opacity-80 ${
+                        ROLE_BADGE_STYLES[activeRole] || "bg-neutral-800 text-neutral-300"
                       }`}
                     >
-                      {ROLE_LABELS[role] || role}
+                      {ROLE_LABELS[activeRole] || activeRole}
+                      <ChevronsUpDown size={9} />
+                    </button>
+                  ) : (
+                    <span
+                      className={`mt-0.5 inline-flex text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                        ROLE_BADGE_STYLES[activeRole] || "bg-neutral-800 text-neutral-300"
+                      }`}
+                    >
+                      {ROLE_LABELS[activeRole] || activeRole}
                     </span>
-                  ))}
-                </div>
+                  )
+                )}
               </div>
             </div>
             <button
@@ -204,6 +191,13 @@ export default function AppLayout() {
       <main className="flex-1 overflow-x-hidden min-h-screen">
         <Outlet />
       </main>
+
+      {roleSwitchNotice && (
+        <div className="fixed bottom-4 right-4 z-50 bg-neutral-900 border border-emerald-500/40 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl shadow-black/40 flex items-center gap-2">
+          <ChevronsUpDown size={14} className="text-emerald-400 shrink-0" />
+          Cambiaste a modo {ROLE_LABELS[roleSwitchNotice] || roleSwitchNotice}
+        </div>
+      )}
     </div>
   );
 }

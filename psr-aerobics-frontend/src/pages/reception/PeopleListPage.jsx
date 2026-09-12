@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { UserPlus, Search } from "lucide-react";
 import PersonRow from "../../features/reception/components/PersonRow";
 import PersonFormModal from "../../features/reception/components/PersonFormModal";
 import HardDeleteModal from "../../features/reception/components/HardDeleteModal";
 import { useAuth } from "../../context/AuthContext";
 import { peopleService } from "../../services/peopleService";
+
+// Un solo debounce para todo — ver el porqué del arreglo completo junto a loadPeople más abajo
+// (errores-frontend.md #3).
+const SEARCH_DEBOUNCE_MS = 350;
 
 export default function PeopleListPage() {
   const { user } = useAuth();
@@ -16,32 +20,70 @@ export default function PeopleListPage() {
   const [pageInfo, setPageInfo] = useState({ totalPages: 0, totalElements: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Conteo real, independiente del filtro de búsqueda (errores-nuevo-front.md #2): `pageInfo`
+  // sale de la misma respuesta paginada que la búsqueda, así que al filtrar refleja los
+  // resultados filtrados, no el total. Este se pide aparte, sin `buscar`, y se refresca solo
+  // tras altas/bajas — no en cada tecleo del buscador.
+  const [activeTotal, setActiveTotal] = useState(null);
 
   const [formModal, setFormModal] = useState(null); // null | { mode: 'add' } | { mode: 'edit', person }
   const [confirmDeactivateId, setConfirmDeactivateId] = useState(null);
   const [hardDeleteTarget, setHardDeleteTarget] = useState(null);
 
+  // Antes de este arreglo había una carrera entre dos peticiones: con el primer carácter
+  // escrito, `searchQuery.trim().length === 1` disparaba el fetch con retardo 0 pero
+  // `length >= 2` seguía siendo falso, así que salía una consulta SIN filtro (la lista
+  // completa). Con el segundo carácter salía la consulta filtrada, a 300ms. La consulta sin
+  // filtro es la más lenta (trae todo) y solía responder después, pisando el resultado
+  // filtrado ya en pantalla — eso era el "se recarga solo y vuelve a mostrar todas las
+  // personas" (errores-frontend.md #3). El arreglo tiene dos mitades: un solo debounce para
+  // todos los casos (abajo) y, acá, un `requestId` que descarta cualquier respuesta que no sea
+  // la de la petición más reciente en curso, sin importar el orden en que lleguen.
+  const searchAbortRef = useRef(null);
+  const requestIdRef = useRef(0);
+
   const loadPeople = useCallback(async () => {
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    const requestId = ++requestIdRef.current;
+
     setLoading(true);
     setError("");
     try {
       const params = { page, size: 20 };
       if (searchQuery.trim().length >= 2) params.buscar = searchQuery.trim();
-      const response = await peopleService.getAll(params);
+      const response = await peopleService.getAll(params, { signal: controller.signal });
+      if (requestId !== requestIdRef.current) return; // ya hay una petición más nueva en curso
       setPeople(response?.content || (Array.isArray(response) ? response : []));
       setPageInfo({ totalPages: response?.totalPages || 0, totalElements: response?.totalElements || 0 });
     } catch (err) {
+      if (err.name === "AbortError") return; // cancelada a propósito, no es un error real
+      if (requestId !== requestIdRef.current) return;
       setPeople([]);
       setError(err.data?.message || err.message || "No fue posible consultar las personas.");
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [page, searchQuery]);
 
   useEffect(() => {
-    const timer = setTimeout(loadPeople, searchQuery.trim().length === 1 ? 0 : 300);
+    const timer = setTimeout(loadPeople, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [loadPeople, searchQuery]);
+  }, [loadPeople]);
+
+  const loadActiveTotal = useCallback(async () => {
+    try {
+      const response = await peopleService.getAll({ page: 0, size: 1 });
+      setActiveTotal(response?.totalElements ?? 0);
+    } catch {
+      // No es crítico: si falla, el encabezado simplemente no muestra el conteo.
+    }
+  }, []);
+
+  useEffect(() => {
+    Promise.resolve().then(loadActiveTotal);
+  }, [loadActiveTotal]);
 
   function handleSearchChange(value) {
     setPage(0);
@@ -57,16 +99,21 @@ export default function PeopleListPage() {
       }
       setFormModal(null);
       await loadPeople();
+      await loadActiveTotal();
     } catch (err) {
       setError(err.data?.message || err.message || "No fue posible guardar la persona.");
     }
   }
 
+  // Actualiza solo la fila afectada en el estado local en vez de volver a pedir la página
+  // completa: esa reconsulta era lo que hacía "sentir" lenta la acción (errores-frontend.md #1),
+  // además de disparar de nuevo la consulta N+1 que el backend ya tiene identificada como lenta.
   async function handleConfirmDeactivate() {
     if (!confirmDeactivateId) return;
     try {
       await peopleService.deactivate(confirmDeactivateId);
-      await loadPeople();
+      setPeople((prev) => prev.map((p) => (p.id === confirmDeactivateId ? { ...p, active: false } : p)));
+      await loadActiveTotal();
     } catch (err) {
       setError(err.data?.message || err.message || "No fue posible desactivar la persona.");
     }
@@ -76,7 +123,8 @@ export default function PeopleListPage() {
   async function handleReactivate(personId) {
     try {
       await peopleService.reactivate(personId);
-      await loadPeople();
+      setPeople((prev) => prev.map((p) => (p.id === personId ? { ...p, active: true } : p)));
+      await loadActiveTotal();
     } catch (err) {
       setError(err.data?.message || err.message || "No fue posible reactivar la persona.");
     }
@@ -88,6 +136,7 @@ export default function PeopleListPage() {
       await peopleService.remove(hardDeleteTarget.id);
       setHardDeleteTarget(null);
       await loadPeople();
+      await loadActiveTotal();
     } catch (err) {
       setError(err.data?.message || err.message || "No fue posible eliminar la persona.");
     }
@@ -101,7 +150,8 @@ export default function PeopleListPage() {
           <div>
             <h1 className="text-xl font-bold text-white tracking-tight">Personas Registradas</h1>
             <p className="text-neutral-400 text-xs mt-0.5">
-              Directorio general de alumnos y miembros ({pageInfo.totalElements} registrados)
+              Directorio general de alumnos y miembros
+              {activeTotal !== null && ` (${activeTotal} usuarios activos)`}
               {isReadOnly && " · Solo lectura"}
             </p>
           </div>
@@ -180,7 +230,7 @@ export default function PeopleListPage() {
 
       {hardDeleteTarget && (
         <HardDeleteModal
-          person={{ name: `${hardDeleteTarget.firstName || ""} ${hardDeleteTarget.lastName || ""}` }}
+          person={hardDeleteTarget}
           onConfirm={handleConfirmHardDelete}
           onClose={() => setHardDeleteTarget(null)}
         />

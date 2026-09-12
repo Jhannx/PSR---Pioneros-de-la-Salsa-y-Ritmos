@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { DataProvider } from "./context/DataContext";
+import { RoleProvider, useRole } from "./context/RoleContext";
+import { HOME_BY_ROLE } from "./constants/roles";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import AppLayout from "./layouts/AppLayout";
 
@@ -8,12 +10,15 @@ import AppLayout from "./layouts/AppLayout";
 import LoginPage from "./pages/auth/LoginPage";
 import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
+import ConfirmEmailChangePage from "./pages/auth/ConfirmEmailChangePage";
+import RoleSelectorPage from "./pages/auth/RoleSelectorPage";
 import SelfRegistrationPage from "./pages/public/SelfRegistrationPage";
 
 // Páginas de la Terminal PSR / Entrada
 import LobbyCheckinPage from "./pages/lobby/LobbyCheckinPage";
 import LobbyRegistrationPage from "./pages/lobby/LobbyRegistrationPage";
 import LobbyQueueDisplayPage from "./pages/lobby/LobbyQueueDisplayPage";
+import LobbyQrCheckinPage from "./pages/lobby/LobbyQrCheckinPage";
 import LobbyPanelPage from "./pages/lobby/LobbyPanelPage";
 
 // Páginas de Recepción y Administración
@@ -33,42 +38,55 @@ import MemberEmergencyContactPage from "./pages/member/MemberEmergencyContactPag
 import MemberRegistrationPage from "./pages/member/MemberRegistrationPage";
 import UserProfilePage from "./pages/member/UserProfilePage";
 
+// Único punto por el que pasa todo login — decide entre el selector de rol y la pantalla de
+// inicio del rol activo. Antes tenía la cadena de `if` que ahora vive centralizada en
+// HOME_BY_ROLE (constants/roles.js §0.1); el orden de esa cadena se conserva ahí.
 function RoleRedirect() {
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
+  const { activeRole, needsRoleSelection } = useRole();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
-
-  if (user.roles.includes("ADMIN")) {
-    return <Navigate to="/admin/reports" replace />;
+  if (needsRoleSelection) {
+    return <Navigate to="/seleccionar-rol" replace />;
   }
-  if (user.roles.includes("RECEPTIONIST") || user.roles.includes("TEACHER")) {
-    return <Navigate to="/reception/checkin" replace />;
-  }
-  if (user.roles.includes("PSR_TERMINAL")) {
-    return <Navigate to="/lobby/panel" replace />;
-  }
-  return <Navigate to="/member/home" replace />;
+  return <Navigate to={HOME_BY_ROLE[activeRole] || "/login"} replace />;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <RoleProvider>
         <DataProvider>
           <Routes>
             {/* Rutas Públicas */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/restablecer-password" element={<ResetPasswordPage />} />
+            <Route path="/confirmar-correo" element={<ConfirmEmailChangePage />} />
             <Route path="/register" element={<SelfRegistrationPage />} />
             <Route path="/member/register" element={<MemberRegistrationPage />} />
+
+            {/* Selector de rol — fuera de AppLayout a propósito: es una pantalla de tránsito
+                (justo tras loguear, o al cambiar de rol desde el sidebar), sin sidebar propio.
+                Protegida porque hace falta estar autenticado para elegir rol, pero no anidada
+                en el grupo de rutas de AppLayout (docs/PLAN-IMPLEMENTACION.md Fase 3). */}
+            <Route
+              path="/seleccionar-rol"
+              element={
+                <ProtectedRoute>
+                  <RoleSelectorPage />
+                </ProtectedRoute>
+              }
+            />
 
             {/* Rutas de la Terminal PSR / Pantalla de Entrada */}
             <Route path="/lobby/checkin" element={<LobbyCheckinPage />} />
             <Route path="/lobby/register" element={<LobbyRegistrationPage />} />
             <Route path="/lobby/queue" element={<LobbyQueueDisplayPage />} />
+            <Route path="/lobby/qr" element={<LobbyQrCheckinPage />} />
 
             {/* Rutas Protegidas dentro de la Estructura AppLayout */}
             <Route
@@ -214,20 +232,27 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
+              {/* Ruta neutra (sin prefijo de rol) — la usa cualquier persona autenticada con
+                  personId, no solo MIEMBRO: un profesor o recepcionista también tienen contacto
+                  de emergencia propio (errores-frontend.md #7, mismo caso que /member/profile →
+                  /profile). */}
               <Route
-                path="/member/emergency-contact"
+                path="/emergency-contact"
                 element={
                   <ProtectedRoute allowedRoles={["ADMIN", "MEMBER", "TEACHER", "RECEPTIONIST"]}>
                     <MemberEmergencyContactPage />
                   </ProtectedRoute>
                 }
               />
+              {/* Redirección desde la ruta vieja, para no romper enlaces guardados. */}
+              <Route path="/member/emergency-contact" element={<Navigate to="/emergency-contact" replace />} />
             </Route>
 
             {/* Ruta por defecto */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </DataProvider>
+        </RoleProvider>
       </AuthProvider>
     </BrowserRouter>
   );

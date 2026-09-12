@@ -1,10 +1,11 @@
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
+import { TOKEN_STORAGE_KEY } from "./apiClient";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
 
 export function createQueueSocketClient({ onAdminQueue, onEsperaQueue, onPrepaidQueue, onError }) {
-  const token = localStorage.getItem("psr_auth_token");
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
 
   const client = new Client({
     webSocketFactory: () => new SockJS(`${API_BASE_URL}/ws`),

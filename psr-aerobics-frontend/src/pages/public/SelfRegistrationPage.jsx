@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, CreditCard, KeyRound, Mail, LogIn, ArrowLeft } from "lucide-react";
+import { CheckCircle2, CreditCard, KeyRound, Mail, Cake, LogIn, ArrowLeft } from "lucide-react";
 import Field from "../../components/forms/Field";
+import BirthDateField from "../../components/forms/BirthDateField";
+import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
 import { peopleService } from "../../services/peopleService";
 
 const inputClass =
@@ -15,17 +17,23 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
   const [documento, setDocumento] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [passwordMode, setPasswordMode] = useState("documento"); // documento | propia
   const [password, setPassword] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  // Panel de confirmación antes del envío final (mejoras-frontend.md §1) — un typo en el
+  // documento o el teléfono acá nadie más lo revisa antes de guardarlo, a diferencia del alta
+  // que hace recepción.
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const canSubmit =
     firstName.trim() &&
     lastName.trim() &&
     documento.trim() &&
     phone.trim() &&
+    birthDate &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
   async function handleSubmit() {
@@ -40,10 +48,13 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
         lastName: lastName.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
+        birthDate,
         password: passwordMode === "documento" ? null : password,
       });
+      setShowConfirm(false);
       setSubmitted(true);
     } catch (err) {
+      setShowConfirm(false);
       setErrorMessage(err.data?.message || err.message || "No fue posible registrar la cuenta.");
     } finally {
       setLoading(false);
@@ -174,6 +185,10 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
             />
           </Field>
 
+          <Field label="Fecha de nacimiento" icon={<Cake size={14} />}>
+            <BirthDateField value={birthDate} onChange={setBirthDate} selectClassName={inputClass} />
+          </Field>
+
           <div>
             <label className="text-neutral-300 text-sm font-semibold flex items-center gap-1.5 mb-1.5">
               <KeyRound size={14} />
@@ -221,13 +236,22 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
         </div>
 
         <button
-          onClick={handleSubmit}
+          onClick={() => setShowConfirm(true)}
           disabled={!canSubmit || loading}
           className="w-full mt-6 bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 active:scale-[0.98] transition-all text-neutral-950 font-bold text-lg py-5 rounded-2xl shadow-lg shadow-emerald-500/20"
         >
           {loading ? "Registrando..." : "Enviar solicitud"}
         </button>
       </div>
+
+      {showConfirm && (
+        <RegistrationConfirmModal
+          data={{ firstName, lastName, documentType, documento, phone, email, birthDate }}
+          submitting={loading}
+          onConfirm={handleSubmit}
+          onClose={() => setShowConfirm(false)}
+        />
+      )}
     </div>
   );
 }

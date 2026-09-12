@@ -14,7 +14,12 @@ export const sessionsService = {
   },
 
   createSession: async (sessionData) => {
-    // SessionRequest: { scheduleId, date, startTime, endTime, teacherUserId }
+    // SessionRequest: { date: LocalDate "YYYY-MM-DD", startTime: OffsetDateTime (obligatorio),
+    // endTime: OffsetDateTime (opcional, sesión queda en curso si falta), teacherUserId: int
+    // (opcional, debe tener rol TEACHER), scheduleId: int (opcional; si viene, máximo una
+    // sesión por horario y fecha) — NOTAS-PARA-FRONTEND.md §1. `date` y `startTime` llevan la
+    // fecha repetida a propósito (confirmado por backend, redundante pero así es el contrato).
+    // Construir startTime/endTime con utils/date.js#toOffsetDateTime, no a mano.
     return await apiClient.post("/api/sesiones", sessionData);
   },
 

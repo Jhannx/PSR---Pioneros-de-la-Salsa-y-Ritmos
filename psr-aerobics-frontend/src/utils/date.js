@@ -45,3 +45,49 @@ export function formatDateTimeShort(dateStr) {
   const date = new Date(dateStr);
   return date.toLocaleString("es-CO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
+
+// Fecha de nacimiento (docs/PLAN-IMPLEMENTACION.md §5.3) — campo nuevo, sin mock de origen.
+// Puede llegar `null`: las personas registradas antes de que este campo existiera no lo tienen.
+export function formatBirthDate(dateStr) {
+  if (!dateStr) return null;
+  const date = new Date(`${dateStr}T00:00:00`);
+  return date.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+// `date` ("YYYY-MM-DD") + `time` ("HH:mm") → OffsetDateTime ISO-8601 con el offset de zona
+// horaria del navegador (ej. "2026-09-10T06:00:00-05:00"). NOTAS-PARA-FRONTEND.md §1: el error
+// "cuerpo de la solicitud JSON inválido" al crear sesiones no era de contenido, era de formato
+// — Jackson espera OffsetDateTime y el frontend mandaba fecha+hora sin offset
+// ("2026-09-10T06:00:00"), que ni siquiera llega al controller. No se hardcodea "-05:00": se
+// calcula del reloj del navegador con `getTimezoneOffset()` (que da minutos *detrás* de UTC, de
+// ahí el signo invertido), para que siga siendo correcto si la app corre en otra zona horaria.
+export function toOffsetDateTime(dateStr, timeStr) {
+  const local = new Date(`${dateStr}T${timeStr}:00`);
+  const offsetMinutes = -local.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, "0");
+  const mm = String(abs % 60).padStart(2, "0");
+  return `${dateStr}T${timeStr}:00${sign}${hh}:${mm}`;
+}
+
+// admin_sessions.jsx mostraba `session.startTime`/`endTime` crudos (OffsetDateTime ISO en UTC,
+// ej. "2026-09-11T20:45:00Z") en vez de la hora local que la persona digitó — mala UX señalada en
+// errores-nuevo-compartido.md #1. `Date` ya interpreta el offset/`Z` del string al convertir a
+// hora local, así que basta con formatear con `toLocaleTimeString`.
+export function formatTimeOfDay(isoDateTimeStr) {
+  return new Date(isoDateTimeStr).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" });
+}
+
+// Fecha límite exacta para exigir mínimo `years` años de edad frente a HOY (no una diferencia de
+// año a secas: alguien nacido hace 9 años y 11 meses no cumple 10, aunque el año ya diste 10)
+// (errores-nuevo-front.md, nota suelta "Cambiar Selector de fechas"). Comparación lexicográfica
+// de strings "YYYY-MM-DD" funciona igual que comparar fechas reales.
+export function getMaxBirthDateForAge(years) {
+  const today = new Date();
+  const cutoff = new Date(today.getFullYear() - years, today.getMonth(), today.getDate());
+  const yyyy = cutoff.getFullYear();
+  const mm = String(cutoff.getMonth() + 1).padStart(2, "0");
+  const dd = String(cutoff.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}

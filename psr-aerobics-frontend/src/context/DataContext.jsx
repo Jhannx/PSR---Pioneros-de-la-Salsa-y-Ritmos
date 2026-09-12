@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 import { peopleService } from "../services/peopleService";
 import { queueService } from "../services/queueService";
 import { sessionsService } from "../services/sessionsService";
+import { TOKEN_STORAGE_KEY } from "../services/apiClient";
 
 const DataContext = createContext(null);
 
@@ -15,7 +16,7 @@ export function DataProvider({ children }) {
 
   // Carga inicial de datos solo si existe un token de autenticación
   const refreshData = useCallback(async () => {
-    const token = localStorage.getItem("psr_auth_token");
+    const token = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!token) {
       setLoading(false);
       setPeople([]);
