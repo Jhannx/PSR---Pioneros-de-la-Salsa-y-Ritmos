@@ -157,8 +157,8 @@ export function DataProvider({ children }) {
 
   async function cancelSession(id) {
     try {
-      const updated = await sessionsService.closeSession(id);
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...updated } : s)));
+      const updated = await sessionsService.cancelSession(id);
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...(updated || { cancelled: true }) } : s)));
       return updated;
     } catch (err) {
       console.error("Error al cancelar sesión:", err);

@@ -23,6 +23,15 @@ export const sessionsService = {
     return await apiClient.post("/api/sesiones", sessionData);
   },
 
+  // Dos operaciones distintas, no intercambiables (NOTAS-PARA-FRONTEND.md §6.6): cancelar marca
+  // la sesión cancelada sin tocar horas y vale siempre, incluso antes de que empiece; cerrar le
+  // pone hora_fin = ahora y solo tiene sentido si ya empezó. El botón "Cancelar" llamaba por
+  // error a closeSession, lo que reventaba contra chk_sesion_horas en sesiones que aún no
+  // empezaban.
+  cancelSession: async (id) => {
+    return await apiClient.delete(`/api/sesiones/${id}`);
+  },
+
   closeSession: async (id) => {
     return await apiClient.put(`/api/sesiones/${id}/cerrar`);
   },

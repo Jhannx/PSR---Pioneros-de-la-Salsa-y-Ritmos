@@ -12,6 +12,30 @@ const TABLE_LABELS = {
   SESSION: "Sesión",
 };
 
+// `field` es el nombre de columna tal cual, sin traducir (confirmado en NOTAS-PARA-FRONTEND.md
+// §3: queda de nuestro lado). Diccionario completo de lo único que el backend puede mandar hoy —
+// no hay más casos que estos 9.
+const FIELD_LABELS = {
+  activo: "Persona reactivada",
+  persona: "Persona eliminada",
+  cancelada: "Sesión cancelada",
+  hora_fin: "Sesión cerrada automáticamente",
+  monto: "Tarifa modificada",
+  monto_recibido: "Pago corregido",
+  monto_abonado: "Pago corregido",
+  personas_por_turno: "Configuración de cola",
+  minutos_margen_ingreso: "Configuración de cola",
+  minutos_visibilidad_pagos: "Configuración de cola",
+};
+
+// El cierre automático de sesiones queda a nombre de esta cuenta técnica, y lo que tocaba a una
+// persona eliminada se reasigna a un usuario centinela — ninguna es una persona del equipo
+// (NOTAS-PARA-FRONTEND.md §3). Solo se traduce SISTEMA porque es el único nombre exacto que dieron;
+// si hay un identificador fijo para el centinela, se agrega acá cuando se confirme.
+const SYSTEM_PERFORMER_LABELS = {
+  SISTEMA: "Sistema (automático)",
+};
+
 const FILTERS = [
   { key: "all", label: "Todo" },
   { key: "PRICING", label: "Tarifa" },
@@ -100,13 +124,15 @@ export default function AuditPage() {
                   {TABLE_LABELS[row.affectedTable] || row.affectedTable}
                 </span>
               </span>
-              <span className="w-40 shrink-0 text-neutral-400 text-sm">{row.field}</span>
+              <span className="w-40 shrink-0 text-neutral-400 text-sm">{FIELD_LABELS[row.field] || row.field}</span>
               <span className="flex-1 flex items-center gap-2 text-sm min-w-0">
                 <span className="text-neutral-600 truncate">{row.oldValue ?? "—"}</span>
                 <ArrowRight size={13} className="text-neutral-700 shrink-0" />
                 <span className="text-white font-semibold truncate">{row.newValue ?? "—"}</span>
               </span>
-              <span className="w-40 shrink-0 text-right text-neutral-400 text-sm">{row.performedBy}</span>
+              <span className="w-40 shrink-0 text-right text-neutral-400 text-sm">
+                {SYSTEM_PERFORMER_LABELS[row.performedBy] || row.performedBy}
+              </span>
               <span className="w-32 shrink-0 text-right text-neutral-600 text-xs">{formatDateTime(row.dateTime)}</span>
             </div>
           ))}
