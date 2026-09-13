@@ -9,12 +9,14 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.checkin.mapper.CheckinMappe
 import com.jhanp.psraerobicsbackend.modules.aerobics.checkin.repository.CheckinProcedureRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.checkin.repository.CheckinRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.checkin.service.interfaces.ICheckinService;
+import com.jhanp.psraerobicsbackend.modules.aerobics.queue.event.QueueChangedEvent;
 import com.jhanp.psraerobicsbackend.modules.aerobics.queue.repository.TodayQueueViewRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.queue.view.TodayQueueView;
 import com.jhanp.psraerobicsbackend.modules.person.repository.PersonRepository;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,7 @@ public class CheckinService implements ICheckinService {
     private final TodayQueueViewRepository todayQueueViewRepository;
     private final PersonRepository personRepository;
     private final CheckinMapper checkinMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -46,8 +49,12 @@ public class CheckinService implements ICheckinService {
                 .orElseThrow(() -> new IllegalStateException(
                         "La llegada no aparece en la cola del día después de registrarla. ID: " + checkinId));
 
-        log.info("Check-in registrado: ID {}, Persona {}, Sesión {}, Posición {}", 
+        log.info("Check-in registrado: ID {}, Persona {}, Sesión {}, Posición {}",
                 checkinId, row.getPersonId(), row.getSessionId(), row.getPosition());
+
+        // El broadcaster escucha AFTER_COMMIT, así que esto no llega a las pantallas hasta que la
+        // transacción confirme.
+        eventPublisher.publishEvent(QueueChangedEvent.checkin(row.getSessionId()));
 
         return checkinMapper.toResponse(row);
     }

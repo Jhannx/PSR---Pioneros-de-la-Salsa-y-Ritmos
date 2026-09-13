@@ -5,7 +5,9 @@ import com.jhanp.psraerobicsbackend.modules.role.enums.RoleName;
 import com.jhanp.psraerobicsbackend.modules.role.service.interfaces.IRoleService;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,6 +23,8 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/roles")
+// Catálogo de roles: solo lo consulta la pantalla de administración de usuarios.
+@PreAuthorize(Authorities.ADMIN)
 @RequiredArgsConstructor
 @Validated
 public class RoleController {

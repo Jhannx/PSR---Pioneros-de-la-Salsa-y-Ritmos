@@ -5,7 +5,7 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.history.enums.AuditableTabl
 import com.jhanp.psraerobicsbackend.modules.aerobics.history.mapper.ChangeHistoryViewMapper;
 import com.jhanp.psraerobicsbackend.modules.aerobics.history.repository.ChangeHistoryViewRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.history.service.interfaces.IChangeHistoryService;
-import com.jhanp.psraerobicsbackend.shared.exception.InvalidDataException;
+import com.jhanp.psraerobicsbackend.shared.validation.DateRanges;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -49,15 +49,8 @@ public class ChangeHistoryService implements IChangeHistoryService {
     @Override
     public Page<ChangeHistoryViewResponse> findBetween(OffsetDateTime from, OffsetDateTime to, Pageable pageable) {
         log.info("Consultando el historial de cambios entre {} y {}", from, to);
-        validateDateRange(from, to);
+        DateRanges.require(from, to);
         return changeHistoryViewRepository.findByDateTimeBetweenOrderByDateTimeDesc(from, to, pageable)
                 .map(changeHistoryViewMapper::toResponse);
-    }
-
-    private void validateDateRange(OffsetDateTime from, OffsetDateTime to) {
-        if (from == null || to == null || from.isAfter(to)) {
-            log.warn("Rango de fechas inválido: fecha inicio ({}) es posterior a fecha fin ({})", from, to);
-            throw new InvalidDataException("La fecha de inicio no puede ser posterior a la fecha de fin");
-        }
     }
 }

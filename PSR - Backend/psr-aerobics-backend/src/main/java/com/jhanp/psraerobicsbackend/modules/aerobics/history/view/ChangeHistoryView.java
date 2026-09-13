@@ -1,5 +1,6 @@
 package com.jhanp.psraerobicsbackend.modules.aerobics.history.view;
 
+import com.jhanp.psraerobicsbackend.modules.aerobics.history.enums.AuditableTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -23,8 +24,21 @@ public class ChangeHistoryView {
     @Id
     private Integer id;
 
-    @Column(name = "tabla_afectada")
-    private String affectedTable;
+    /**
+     * AuditableTable y no String, y de eso dependía que el endpoint funcionara.
+     * <p>
+     * Declarado como String, esta columna llegaba con el valor crudo de la base ("PERSONA") y
+     * MapStruct, al mapear hacia ChangeHistoryViewResponse —que sí declara el enum—, generaba un
+     * {@code Enum.valueOf(AuditableTable.class, "PERSONA")}. Como las constantes están en inglés
+     * (PERSON), eso reventaba con "No enum constant ...AuditableTable.PERSONA" y todo
+     * GET /api/auditoria/historial-cambios respondía 500.
+     * <p>
+     * Con el tipo correcto entra AuditableTableConverter, que es quien sabe traducir, y MapStruct
+     * pasa a mapear enum → enum sin generar nada. El converter es de JPA: sobre un String no se
+     * aplica nunca, por eso no bastaba con que existiera.
+     */
+    @Column(name = "tabla_afectada", columnDefinition = "tabla_auditable_enum")
+    private AuditableTable affectedTable;
 
     @Column(name = "registro_id")
     private Integer recordId;

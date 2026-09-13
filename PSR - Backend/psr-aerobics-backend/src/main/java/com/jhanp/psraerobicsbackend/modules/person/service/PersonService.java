@@ -14,12 +14,11 @@ import com.jhanp.psraerobicsbackend.modules.person.repository.PersonProcedureRep
 import com.jhanp.psraerobicsbackend.modules.person.repository.PersonProfileViewRepository;
 import com.jhanp.psraerobicsbackend.modules.person.repository.PersonRepository;
 import com.jhanp.psraerobicsbackend.modules.person.service.interfaces.IPersonService;
-import com.jhanp.psraerobicsbackend.modules.user.dto.response.UserResponse;
 import com.jhanp.psraerobicsbackend.modules.user.entity.User;
 import com.jhanp.psraerobicsbackend.modules.user.repository.UserRepository;
-import com.jhanp.psraerobicsbackend.modules.user.service.interfaces.IUserService;
 import com.jhanp.psraerobicsbackend.shared.exception.DuplicateResourceException;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
+import com.jhanp.psraerobicsbackend.shared.validation.SearchTerms;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -30,11 +29,14 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * El alta pasa por dos procedimientos en una sola transacción: sp_registrar_persona y, acto seguido,
- * la creación de la cuenta. Si la segunda falla, la persona tampoco queda registrada.
+ * Todo lo que le pasa a una persona menos su alta completa: consulta, edición, baja, reactivación y
+ * las vistas de perfil y saldo.
  * <p>
- * userId no cuelga de la entidad Person — la clave foránea vive en usuario — así que lo resuelve
- * este service y se lo pasa al mapper.
+ * El alta la coordina {@code RegisterService}, que encadena {@link #createPerson} con la creación de
+ * la cuenta en una sola transacción. Aquí no se sabe nada de contraseñas ni de correos.
+ * <p>
+ * userId no cuelga de la entidad Person — la clave foránea vive en usuario — así que lo resuelve este
+ * service y se lo pasa al mapper.
  */
 @Service
 public class PersonService implements IPersonService {
@@ -46,7 +48,6 @@ public class PersonService implements IPersonService {
     private final UserRepository userRepository;
     private final PersonMapper personMapper;
     private final PersonViewMapper personViewMapper;
-    private final IUserService userService;
 
     public PersonService(PersonRepository personRepository,
                          PersonProcedureRepository personProcedureRepository,
@@ -54,8 +55,7 @@ public class PersonService implements IPersonService {
                          PersonBalanceViewRepository personBalanceViewRepository,
                          UserRepository userRepository,
                          PersonMapper personMapper,
-                         PersonViewMapper personViewMapper,
-                         IUserService userService) {
+                         PersonViewMapper personViewMapper) {
         this.personRepository = personRepository;
         this.personProcedureRepository = personProcedureRepository;
         this.personProfileViewRepository = personProfileViewRepository;
@@ -63,7 +63,6 @@ public class PersonService implements IPersonService {
         this.userRepository = userRepository;
         this.personMapper = personMapper;
         this.personViewMapper = personViewMapper;
-        this.userService = userService;
     }
 
     /**
@@ -71,26 +70,50 @@ public class PersonService implements IPersonService {
      * <p>
      * El duplicado se comprueba antes del CALL para responder 409 con un mensaje claro; sin esto, la
      * restricción UNIQUE de la tabla saltaría como un error de base de datos genérico.
+     * <p>
+     * Solo crea la persona: la cuenta la crea {@code RegisterService} acto seguido, en la misma
+     * transacción.
      */
     @Override
     @Transactional
-    public PersonResponse create(PersonRequest request, RegistrationSource source) {
+    public Integer createPerson(PersonRequest request, RegistrationSource source) {
         if (personRepository.existsByDocumentNumber(request.documentNumber())) {
             throw new DuplicateResourceException(
                     "Ya existe una persona con el documento " + request.documentNumber());
         }
 
-        Integer personId = personProcedureRepository.registerPerson(
+        if (isPhoneTaken(request.phone(), null)) {
+            throw new DuplicateResourceException(
+                    "Ya existe una persona con el número de teléfono " + request.phone());
+        }
+
+        return personProcedureRepository.registerPerson(
                 request.documentType(),
                 request.documentNumber(),
                 request.firstName(),
                 request.lastName(),
                 request.phone(),
+                request.birthDate(),
                 source);
+    }
 
-        UserResponse user = userService.createForPerson(personId, initialPassword(request));
+    /**
+     * Endpoint propio y no parte del PUT de persona, y la razón es de permisos.
+     * <p>
+     * PUT /api/personas/{id} está restringido al mostrador y reescribe documento, nombre y teléfono.
+     * Para que un miembro pudiera editar sus propias observaciones de salud habría que abrir ese PUT
+     * a OR_SELF, y entonces también podría cambiarse el número de documento. Un endpoint aparte, que
+     * solo toca esta columna, se puede abrir al dueño sin arrastrar nada más.
+     * <p>
+     * Admite null y blanco: borrar lo que uno escribió es una operación legítima.
+     */
+    @Override
+    @Transactional
+    public PersonResponse updateHealthObservations(Integer id, String healthObservations) {
+        Person person = findPersonOrThrow(id);
+        person.setHealthObservations(healthObservations);
 
-        return personMapper.toResponse(findPersonOrThrow(personId), user.id());
+        return toResponse(personRepository.save(person));
     }
 
     @Override
@@ -104,15 +127,20 @@ public class PersonService implements IPersonService {
                     "Ya existe otra persona con el documento " + request.documentNumber());
         }
 
+        if (isPhoneTaken(request.phone(), id)) {
+            throw new DuplicateResourceException(
+                    "Ya existe otra persona con el número de teléfono " + request.phone());
+        }
+
         personMapper.updateEntity(request, person);
 
-        return personMapper.toResponse(personRepository.save(person), resolveUserId(id));
+        return toResponse(personRepository.save(person));
     }
 
     @Override
     @Transactional(readOnly = true)
     public PersonResponse findById(Integer id) {
-        return personMapper.toResponse(findPersonOrThrow(id), resolveUserId(id));
+        return toResponse(findPersonOrThrow(id));
     }
 
     @Override
@@ -122,7 +150,7 @@ public class PersonService implements IPersonService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No existe una persona con el documento " + documentNumber));
 
-        return personMapper.toResponse(person, resolveUserId(person.getId()));
+        return toResponse(person);
     }
 
     @Override
@@ -134,7 +162,9 @@ public class PersonService implements IPersonService {
     @Override
     @Transactional(readOnly = true)
     public Page<PersonResponse> search(String term, Pageable pageable) {
-        return toResponsePage(personRepository.search(term, pageable));
+        // unsorted() no es opcional: la consulta es nativa y trae su propio ORDER BY. Con un
+        // ?sort= en la URL, Spring le pega un segundo ORDER BY y el SQL revienta con 500.
+        return toResponsePage(personRepository.search(term, SearchTerms.unsorted(pageable)));
     }
 
     /**
@@ -155,7 +185,7 @@ public class PersonService implements IPersonService {
     public PersonResponse reactivate(Integer id, Integer executedByUserId) {
         personProcedureRepository.reactivate(id, executedByUserId);
 
-        return personMapper.toResponse(findPersonOrThrow(id), resolveUserId(id));
+        return toResponse(findPersonOrThrow(id));
     }
 
     /**
@@ -205,12 +235,21 @@ public class PersonService implements IPersonService {
     }
 
     /**
-     * RF-01: si no se envía contraseña, la inicial es el propio número de documento.
+     * El teléfono se trata como el documento y el correo: si ya está, se avisa con un 409 y un mensaje
+     * que dice cuál es el número repetido. No es una integridad que garantice la base —no hay UNIQUE
+     * en persona.telefono—, es un aviso para que quien está en el mostrador decida: casi siempre
+     * significa que esa persona ya estaba registrada, y cuando de verdad comparten número (dos
+     * personas de la misma casa) basta con dejarlo en la otra ficha o registrar el suyo propio.
+     *
+     * @param excludeId persona a excluir de la comprobación, o null al dar de alta
      */
-    private String initialPassword(PersonRequest request) {
-        return request.password() != null && !request.password().isBlank()
-                ? request.password()
-                : request.documentNumber();
+    private boolean isPhoneTaken(String phone, Integer excludeId) {
+        if (phone == null || phone.isBlank()) {
+            return false;
+        }
+        return excludeId == null
+                ? personRepository.existsByPhone(phone)
+                : personRepository.existsByPhoneAndIdNot(phone, excludeId);
     }
 
     private Person findPersonOrThrow(Integer id) {
@@ -218,28 +257,40 @@ public class PersonService implements IPersonService {
                 .orElseThrow(() -> new ResourceNotFoundException("No existe la persona " + id));
     }
 
-    private Integer resolveUserId(Integer personId) {
-        return userRepository.findByPersonId(personId)
-                .map(User::getId)
-                .orElse(null);
+    /**
+     * Arma el Response resolviendo la cuenta de esa persona. Una sola consulta para las dos cosas que
+     * el Response necesita de usuario: el id y el correo.
+     * <p>
+     * La cuenta puede no existir: sp_eliminar_persona deja huérfana a la persona sentinel, y nada
+     * impide en el esquema que una fila de persona se quede sin usuario.
+     */
+    private PersonResponse toResponse(Person person) {
+        return userRepository.findByPersonId(person.getId())
+                .map(user -> personMapper.toResponse(person, user.getId(), user.getEmail()))
+                .orElseGet(() -> personMapper.toResponse(person, null, null));
     }
 
     /**
-     * Resuelve los userId de la página entera con una sola consulta. Hacerlo persona por persona
+     * Resuelve las cuentas de la página entera con una sola consulta. Hacerlo persona por persona
      * sería una consulta por fila (N+1).
      */
     private Page<PersonResponse> toResponsePage(Page<Person> page) {
         List<Integer> personIds = page.getContent().stream().map(Person::getId).toList();
 
-        Map<Integer, Integer> userIdByPerson = personIds.isEmpty()
+        Map<Integer, User> accountByPerson = personIds.isEmpty()
                 ? Map.of()
                 : userRepository.findByPersonIdIn(personIds).stream()
                 .filter(user -> user.getPerson() != null)
                 .collect(Collectors.toMap(
                         user -> user.getPerson().getId(),
-                        User::getId,
+                        user -> user,
                         (first, second) -> first));
 
-        return page.map(person -> personMapper.toResponse(person, userIdByPerson.get(person.getId())));
+        return page.map(person -> {
+            User account = accountByPerson.get(person.getId());
+            return account == null
+                    ? personMapper.toResponse(person, null, null)
+                    : personMapper.toResponse(person, account.getId(), account.getEmail());
+        });
     }
 }

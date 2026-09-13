@@ -5,7 +5,10 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.pricing.dto.response.Pricin
 import com.jhanp.psraerobicsbackend.modules.aerobics.pricing.service.interfaces.IPricingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.jhanp.psraerobicsbackend.security.AuthenticatedUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/tarifa")
+// Consultarla la necesita todo el personal —sin saber el precio no se puede cobrar—; cambiarla no.
+@PreAuthorize(Authorities.STAFF)
 @RequiredArgsConstructor
 @Validated
 public class PricingController {
@@ -27,8 +32,15 @@ public class PricingController {
 
     /**
      * Consulta la tarifa vigente aplicada a las asistencias.
+     * <p>
+     * Abierto también a MIEMBRO y a la Terminal, no solo al personal: cuánto cuesta la clase no es
+     * información interna, es el precio que la persona va a pagar. Su pantalla de inicio lo muestra,
+     * y con el permiso heredado de la clase recibía un 403.
+     * <p>
+     * Sigue fuera del alcance de quien no ha iniciado sesión: el precio se ve estando dentro.
      */
     @GetMapping
+    @PreAuthorize(Authorities.PERSON_LOOKUP + " or hasAuthority('MEMBER')")
     public ResponseEntity<PricingResponse> getCurrent() {
         return ResponseEntity.ok(pricingService.getCurrent());
     }
@@ -40,24 +52,13 @@ public class PricingController {
      * auditar el cambio.
      */
     @PutMapping
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<PricingResponse> update(
             @Valid @RequestBody PricingRequest request,
             Authentication authentication) {
 
-        Integer userId = resolveUserId(authentication);
+        Integer userId = AuthenticatedUser.requireId(authentication);
         return ResponseEntity.ok(pricingService.update(request, userId));
     }
 
-    private Integer resolveUserId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof Integer id) {
-            return id;
-        }
-        if (authentication != null) {
-            try {
-                return Integer.parseInt(authentication.getName());
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return 1;
-    }
 }

@@ -21,6 +21,8 @@ public interface SessionRepository extends JpaRepository<Session, Integer> {
      */
     Page<Session> findByDateBetweenOrderByDateDescStartTimeDesc(LocalDate from, LocalDate to, Pageable pageable);
 
+    Page<Session> findAllByOrderByDateDescStartTimeDesc(Pageable pageable);
+
     Optional<Session> findByScheduleIdAndDate(Integer scheduleId, LocalDate date);
 
     /**

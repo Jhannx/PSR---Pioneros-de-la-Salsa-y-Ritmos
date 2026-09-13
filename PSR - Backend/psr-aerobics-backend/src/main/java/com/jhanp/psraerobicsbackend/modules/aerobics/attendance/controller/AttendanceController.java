@@ -10,7 +10,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.jhanp.psraerobicsbackend.security.AuthenticatedUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -26,6 +29,8 @@ import java.time.LocalDate;
  * Gestión y consulta de asistencias a clases.
  */
 @RestController
+// Confirmar y anular asistencia es operar la clase; el historial lo consulta todo el personal.
+@PreAuthorize(Authorities.STAFF)
 @RequiredArgsConstructor
 @Validated
 public class AttendanceController {
@@ -42,7 +47,7 @@ public class AttendanceController {
             @PathVariable @Positive(message = "El ID de llegada debe ser positivo") Integer id,
             Authentication authentication) {
 
-        Integer userId = resolveUserId(authentication);
+        Integer userId = AuthenticatedUser.requireId(authentication);
         return ResponseEntity.ok(attendanceService.confirm(id, userId));
     }
 
@@ -71,6 +76,7 @@ public class AttendanceController {
      * Historial de asistencias de una persona específica.
      */
     @GetMapping("/api/asistencias/historial/persona/{personaId}")
+    @PreAuthorize(Authorities.STAFF + Authorities.OR_SELF_PERSON_ID)
     public ResponseEntity<Page<AttendanceHistoryViewResponse>> getHistoryByPerson(
             @PathVariable("personaId") @Positive(message = "El ID de persona debe ser positivo") Integer personId,
             @PageableDefault(size = 20) Pageable pageable) {
@@ -105,6 +111,7 @@ public class AttendanceController {
      * Cobertura de saldo asistencia por asistencia de una persona.
      */
     @GetMapping("/api/personas/{id}/saldo-asistencias")
+    @PreAuthorize(Authorities.STAFF + Authorities.OR_SELF)
     public ResponseEntity<Page<AttendanceBalanceViewResponse>> getBalanceByPerson(
             @PathVariable @Positive(message = "El ID de persona debe ser positivo") Integer id,
             @PageableDefault(size = 20) Pageable pageable) {
@@ -112,16 +119,4 @@ public class AttendanceController {
         return ResponseEntity.ok(attendanceService.getBalanceByPerson(id, pageable));
     }
 
-    private Integer resolveUserId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof Integer uid) {
-            return uid;
-        }
-        if (authentication != null) {
-            try {
-                return Integer.parseInt(authentication.getName());
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return 1;
-    }
 }

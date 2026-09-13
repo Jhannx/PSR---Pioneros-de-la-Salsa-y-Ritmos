@@ -3,7 +3,10 @@ package com.jhanp.psraerobicsbackend.modules.person.dto.request;
 import com.jhanp.psraerobicsbackend.modules.person.enums.DocumentType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Size;
+
+import java.time.LocalDate;
 
 /**
  * Entrada de PUT /api/personas/{id} — solo datos básicos.
@@ -30,6 +33,16 @@ public record PersonUpdateRequest(
 
         @NotBlank(message = "El teléfono es obligatorio")
         @Size(max = 20, message = "El teléfono no puede superar los 20 caracteres")
-        String phone
+        String phone,
+
+        /**
+         * Igual que en el alta: obligatoria aquí aunque la columna sea nullable.
+         * <p>
+         * Ojo con editar una persona histórica que no la tenga: el PUT exigirá rellenarla, que es lo
+         * que se busca — el dato entra al sistema poco a poco, según se vayan tocando las fichas.
+         */
+        @NotNull(message = "La fecha de nacimiento es obligatoria")
+        @Past(message = "La fecha de nacimiento debe ser anterior a hoy")
+        LocalDate birthDate
 ) {
 }

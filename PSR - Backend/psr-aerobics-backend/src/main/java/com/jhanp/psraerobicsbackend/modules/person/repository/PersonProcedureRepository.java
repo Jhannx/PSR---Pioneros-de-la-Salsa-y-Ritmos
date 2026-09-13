@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.simple.SimpleJdbcCall;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Types;
+import java.time.LocalDate;
 
 /**
  * Acceso a los procedimientos almacenados de persona. Se mantiene aparte de {@link PersonRepository}
@@ -34,6 +35,7 @@ public class PersonProcedureRepository {
                         new SqlParameter("p_nombre", Types.VARCHAR),
                         new SqlParameter("p_apellidos", Types.VARCHAR),
                         new SqlParameter("p_telefono", Types.VARCHAR),
+                        new SqlParameter("p_fecha_nacimiento", Types.DATE),
                         new SqlParameter("p_fuente_registro", Types.OTHER),
                         new SqlOutParameter("p_persona_id", Types.INTEGER)
                 );
@@ -42,12 +44,21 @@ public class PersonProcedureRepository {
     /**
      * sp_registrar_persona. Los enums de Postgres se envían como Types.OTHER; si el driver rechazara
      * el cast, hay que envolver el valor en un PGobject con el nombre del tipo.
+     * <p>
+     * El orden de los parámetros declarados arriba tiene que coincidir con el del procedimiento en
+     * R__STORED_PROCEDURES.sql. Se declaran a mano
+     * ({@code withoutProcedureColumnMetaDataAccess}), así que si el procedimiento cambia de firma y
+     * esto no, el fallo aparece en tiempo de ejecución y no al compilar.
+     *
+     * @param birthDate admite null: la columna es nullable para no romper a las personas ya
+     *                  registradas. Que sea obligatorio en las altas nuevas lo valida PersonRequest.
      */
     public Integer registerPerson(DocumentType documentType,
                                   String documentNumber,
                                   String name,
                                   String lastName,
                                   String phone,
+                                  LocalDate birthDate,
                                   RegistrationSource registrationSource) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("p_tipo_documento", documentType.name(), Types.OTHER)
@@ -55,6 +66,7 @@ public class PersonProcedureRepository {
                 .addValue("p_nombre", name)
                 .addValue("p_apellidos", lastName)
                 .addValue("p_telefono", phone)
+                .addValue("p_fecha_nacimiento", birthDate, Types.DATE)
                 .addValue("p_fuente_registro", registrationSource.getDbValue(), Types.OTHER);
 
         return (Integer) registerPersonCall.execute(params).get("p_persona_id");

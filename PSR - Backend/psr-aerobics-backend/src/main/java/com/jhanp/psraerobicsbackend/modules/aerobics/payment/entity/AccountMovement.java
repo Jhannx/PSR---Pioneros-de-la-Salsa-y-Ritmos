@@ -6,16 +6,25 @@ import com.jhanp.psraerobicsbackend.modules.person.entity.Person;
 import com.jhanp.psraerobicsbackend.modules.user.entity.User;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.DynamicUpdate;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
+/**
+ * @DynamicUpdate por lo mismo que en {@code Person}: tipo_movimiento es un enum de Postgres que el
+ * converter bindea como varchar, y un UPDATE con todas las columnas lo arrastraba aunque la
+ * corrección de un movimiento solo cambie montos, método de pago o nota. Con el UPDATE limitado a lo
+ * modificado, la columna enum no entra en la sentencia. El alta de movimientos no sufre esto: va por
+ * sp_registrar_movimiento, que ya pasa el enum como Types.OTHER.
+ */
 @Getter
 @Setter
 @AllArgsConstructor
 @RequiredArgsConstructor
 @Entity
 @Builder
+@DynamicUpdate
 @Table(name = "movimiento_cuenta")
 public class AccountMovement {
 

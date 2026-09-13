@@ -8,8 +8,12 @@ import org.mapstruct.Mapping;
 import org.mapstruct.MappingTarget;
 
 /**
- * JPA plano: el PUT es un upsert manual (buscar por persona_id y, si no existe, crear), así que hace
- * falta tanto construir la entidad como aplicar el request sobre una existente.
+ * JPA plano. Hacen falta las dos direcciones porque los cuatro endpoints se reparten el trabajo:
+ * POST construye una entidad nueva, PUT aplica el request sobre una que ya existe.
+ * <p>
+ * person se ignora en ambas: un contacto nunca cambia de persona. Al crear lo fija el service desde
+ * el personId del path; al editar se deja como está — si el request pudiera tocarlo, un PUT sobre
+ * /api/contactos-emergencia/{id} permitiría mover el contacto a otra ficha.
  */
 @Mapper(componentModel = "spring")
 public interface EmergencyContactMapper {

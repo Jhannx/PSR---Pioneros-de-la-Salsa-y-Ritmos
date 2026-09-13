@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Proyecto ###
+example-impl/
+docs/
+.env
+.env.*
+!.env.example

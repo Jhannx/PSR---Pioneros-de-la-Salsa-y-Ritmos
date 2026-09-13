@@ -3,7 +3,17 @@
 -- Tipos de datos y extensiones
 -- PSR Aeróbicos — Extensiones y tipos (enums)
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto; -- necesaria para gen_random_bytes() en sp_solicitar_recuperacion
+-- pgcrypto ya no la usa nadie: los tokens de contraseña se generan en Java (PasswordTokenService), que
+-- necesita el valor en claro para meterlo en el correo. Se deja instalada porque gen_random_uuid() y
+-- las funciones de digest son útiles y la extensión no cuesta nada.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- unaccent: quita las tildes al comparar, para que los buscadores encuentren igual.
+--
+-- Sin esto, escribir "perez" no encuentra a "Pérez" y "munoz" no encuentra a "Muñoz". Con nombres
+-- colombianos eso no es un caso raro: es lo que la gente teclea siempre, porque nadie pone tildes
+-- cuando busca. Lo usan las consultas de búsqueda de persona y de cuenta.
+CREATE EXTENSION IF NOT EXISTS unaccent;
 
 CREATE TYPE fuente_registro_enum AS ENUM (
     'ADMIN', 'AUTOREGISTRO'
@@ -26,7 +36,7 @@ CREATE TYPE tabla_auditable_enum AS ENUM (
     );
 
 CREATE TYPE rol_nombre_enum AS ENUM (
-    'ADMIN', 'MIEMBRO', 'PROFESOR'
+    'ADMIN', 'MIEMBRO', 'PROFESOR', 'RECEPCIONISTA', 'PSR_TERMINAL'
     );
 
 -- Tablas
@@ -47,6 +57,23 @@ CREATE TABLE persona (
     nombre VARCHAR(100) NOT NULL,
     apellidos VARCHAR(100) NOT NULL,
     telefono VARCHAR(20) NOT NULL,
+
+    -- NULLABLE a propósito, aunque la aplicación la exija en las altas nuevas. Las personas ya
+    -- registradas no tienen el dato, y un NOT NULL aquí obligaría a inventarles una fecha o a dejar
+    -- la migración sin aplicar. La obligatoriedad vive en PersonRequest (@NotNull + @Past), que es
+    -- donde se puede distinguir "alta nueva" de "fila histórica".
+    --
+    -- Para qué: gestos de la academia, saber cumpleaños. No hay ninguna regla de negocio por edad, y
+    -- guardar la fecha no da por sí sola el aviso de "cumpleaños esta semana" — eso necesitaría una
+    -- vista y una pantalla, y queda fuera de alcance.
+    fecha_nacimiento DATE,
+
+    -- Vive en la PERSONA y no en contacto_emergencia. Antes estaba allí, cuando el contacto era uno
+    -- solo; con varios contactos deja de tener sentido: una alergia o una condición cardiaca es de
+    -- quien entra a la clase, no de a quién hay que llamar. Si se quedara en el contacto habría que
+    -- decidir cuál de los cinco la lleva, o repetirla en todos.
+    observaciones_salud TEXT,
+
     fuente_registro fuente_registro_enum NOT NULL,
     fecha_registro TIMESTAMPTZ NOT NULL DEFAULT now(),
     activo BOOLEAN NOT NULL DEFAULT true,
@@ -54,22 +81,42 @@ CREATE TABLE persona (
 );
 
 -- CONTACTO_EMERGENCIA --
+-- Hasta cinco por persona, todos con el mismo peso: no hay contacto "principal" ni orden de
+-- prioridad. Quien atiende una urgencia llama por la lista, no por un ranking que nadie mantiene.
 CREATE TABLE contacto_emergencia (
     id  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    persona_id INTEGER NOT NULL UNIQUE REFERENCES persona(id),
+
+    -- SIN UNIQUE: aquí estaba la relación 1:1. Quitarlo es lo que convierte la tabla en 1:N, y
+    -- arrastra dos cosas que no son obvias:
+    --   1. El tope de 5 tiene que ser un TRIGGER. Un CHECK no puede contar filas de su propia tabla.
+    --      Ver trg_limitar_contactos_emergencia en R__TRIGGERS.sql.
+    --   2. vista_perfil_persona ya NO puede unir contra esta tabla: con tres contactos devolvería a
+    --      la misma persona tres veces, y con ella su saldo y su conteo de asistencias. Las columnas
+    --      de contacto salieron de esa vista; la lista la sirve su propio endpoint.
+    persona_id INTEGER NOT NULL REFERENCES persona(id),
+
     nombre VARCHAR(150),
     telefono VARCHAR(20),
-    observaciones TEXT,
+
+    -- observaciones se fue a persona.observaciones_salud. No es un contacto, es la persona.
+
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- Dos columnas y no tres, porque la tercera ya no está aquí. Un contacto sin nombre ni teléfono
+    -- no es un contacto.
     CONSTRAINT chk_contacto_emergencia_no_vacio
-    CHECK (nombre IS NOT NULL OR telefono IS NOT NULL OR observaciones IS NOT NULL)
+    CHECK (nombre IS NOT NULL OR telefono IS NOT NULL)
 );
+-- Lo daba gratis el UNIQUE que acabamos de quitar, y sin él cada "dame los contactos de esta
+-- persona" sería un recorrido secuencial de la tabla.
+CREATE INDEX idx_contacto_emergencia_persona ON contacto_emergencia (persona_id);
 
 -- USUARIO --
 CREATE TABLE usuario (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     numero_documento VARCHAR(20) UNIQUE,
-    correo VARCHAR(150) UNIQUE,
+    -- Sin UNIQUE aquí: lo pone uq_usuario_correo_lower, más abajo, que además ignora mayúsculas.
+    correo VARCHAR(150),
     password_hash TEXT NOT NULL,
     persona_id INTEGER REFERENCES persona(id),
     activo BOOLEAN NOT NULL DEFAULT true,
@@ -78,6 +125,20 @@ CREATE TABLE usuario (
     CONSTRAINT chk_usuario_identificador CHECK (numero_documento IS NOT NULL OR correo IS NOT NULL)
 );
 CREATE INDEX idx_usuario_persona ON usuario (persona_id);
+
+-- Unicidad de correo insensible a mayúsculas.
+--
+-- Un UNIQUE normal compara byte a byte: "Ana@x.com" y "ana@x.com" serían dos filas válidas. El día
+-- que alguien se registre con mayúsculas y luego escriba su correo como lo escribe siempre, no podrá
+-- entrar — y habrá dos cuentas para la misma persona.
+--
+-- Va en la base y no solo en Java porque el correo se escribe desde más de un sitio: UserService
+-- normaliza a minúsculas, pero sp_registrar_usuario_para_persona y el seeder insertan directo. Una
+-- restricción en la tabla la cumplen todos los caminos.
+--
+-- Los NULL no chocan entre sí: Postgres considera distintos dos NULL en un índice único, así que las
+-- cuentas identificadas solo por documento siguen conviviendo sin problema.
+CREATE UNIQUE INDEX uq_usuario_correo_lower ON usuario (LOWER(correo));
 
 -- USUARIO_ROL --
 -- Un usuario puede tener varios roles simultáneos, ejemplo: Un administrador que a la vez puede ser profesor
@@ -146,7 +207,9 @@ CREATE INDEX idx_llegada_sesion ON llegada (sesion_id);
 CREATE TABLE asistencia (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     llegada_id INTEGER NOT NULL UNIQUE REFERENCES llegada(id),
-    monto_cobrado NUMERIC(10,2) NOT NULL,
+    -- NUMERIC(10,0): pesos colombianos enteros. El centavo no circula, así que la base rechaza un
+    -- 4000.50 en vez de aceptarlo y arrastrarlo. Ver la nota sobre dinero en V1, más abajo.
+    monto_cobrado NUMERIC(10,0) NOT NULL,
     marcado_por INTEGER NOT NULL REFERENCES usuario(id),
     hora_marcado TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_monto_cobrado_no_negativo CHECK (monto_cobrado >= 0)
@@ -164,8 +227,8 @@ CREATE TABLE movimiento_cuenta (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     persona_id INTEGER NOT NULL REFERENCES persona(id),
     llegada_id INTEGER REFERENCES llegada(id),
-    monto_recibido NUMERIC(10,2) NOT NULL,
-    monto_abonado NUMERIC(10,2) NOT NULL,
+    monto_recibido NUMERIC(10,0) NOT NULL,
+    monto_abonado NUMERIC(10,0) NOT NULL,
     metodo_pago_id INTEGER NOT NULL REFERENCES metodo_pago(id),
     tipo_movimiento tipo_movimiento_enum NOT NULL DEFAULT 'ABONO',
     movimiento_original_id INTEGER REFERENCES movimiento_cuenta(id),
@@ -183,21 +246,120 @@ CREATE INDEX idx_movimiento_persona ON movimiento_cuenta (persona_id);
 CREATE INDEX idx_movimiento_llegada ON movimiento_cuenta (llegada_id);
 
 -- TOKEN_RECUPERACION --
+-- Token de un solo uso, con caducidad, que autoriza a fijar una contraseña sin conocer la anterior.
+-- Cubre los dos casos: la invitación del alta y el "olvidé mi contraseña". El mecanismo es idéntico;
+-- lo único que cambia es cuánto dura y qué correo sale, y eso lo decide Java.
 CREATE TABLE token_recuperacion (
     id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    usuario_id INTEGER NOT NULL REFERENCES usuario(id),
-    token TEXT NOT NULL UNIQUE,
+
+    -- UNIQUE, no un índice a secas: pedir un token nuevo invalida el anterior. Sin esto, una segunda
+    -- solicitud dejaría dos enlaces vivos a la vez.
+    usuario_id INTEGER NOT NULL UNIQUE REFERENCES usuario(id),
+
+    -- El HASH SHA-256 del token, nunca el token. El valor original solo existe dentro del correo: ni
+    -- la base de datos ni los logs lo ven. Al recibir uno se hashea y se busca por esta columna.
+    -- SHA-256 y no BCrypt porque el token tiene 256 bits de aleatoriedad (no hay fuerza bruta viable,
+    -- un algoritmo lento no aporta nada) y porque BCrypt lleva sal aleatoria: el mismo token daría
+    -- hashes distintos y no se podría BUSCAR por él.
+    token_hash TEXT NOT NULL UNIQUE,
+
+    -- VARCHAR con CHECK y no un enum de Postgres: nada en SQL lo lee, y un enum obligaría a castear
+    -- en cada INSERT de JPA. Los valores en español, como el resto del esquema.
+    tipo VARCHAR(20) NOT NULL,
+
     fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT now(),
     fecha_expiracion TIMESTAMPTZ NOT NULL,
-    usado BOOLEAN NOT NULL DEFAULT false,
+
+    -- Un solo uso se consigue BORRANDO la fila en el canje, no marcándola: así no queda rastro de un
+    -- token gastado ocupando la fila UNIQUE del usuario.
+    CONSTRAINT chk_token_tipo CHECK (tipo IN ('INVITACION', 'RECUPERACION')),
     CONSTRAINT chk_expiracion_valida CHECK (fecha_expiracion > fecha_creacion)
 );
-CREATE INDEX idx_token_usuario ON token_recuperacion (usuario_id);
+
+-- TOKEN_CAMBIO_CORREO --
+-- Cambiar el correo no puede ser un UPDATE directo: quien tuviera acceso momentáneo a una sesión
+-- ajena podría apuntar la cuenta a un correo propio y adueñarse de ella desde "olvidé mi
+-- contraseña", sin que el dueño real se entere de nada. El cambio se pide, se confirma desde el
+-- buzón nuevo, y solo entonces se aplica.
+--
+-- Tabla propia y no una fila más en token_recuperacion, por dos motivos:
+--   1. Hay que guardar el correo NUEVO hasta que se confirme, y aquella tabla no tiene dónde.
+--   2. token_recuperacion lleva usuario_id UNIQUE, y emitir un token borra el anterior del mismo
+--      usuario. Compartirla haría que pedir un cambio de correo invalidara una recuperación de
+--      contraseña en curso, y al revés: son dos trámites independientes y tienen que convivir.
+CREATE TABLE token_cambio_correo (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    -- UNIQUE por lo mismo que en token_recuperacion: pedir un cambio nuevo invalida el anterior, y
+    -- así no quedan dos enlaces vivos apuntando a correos distintos.
+    --
+    -- ON DELETE CASCADE, y aquí sí: sp_eliminar_persona borra la cuenta y solo sabe vaciar
+    -- token_recuperacion antes. Sin la cascada, esta tabla dejaría esa rutina rota en cuanto
+    -- alguien con un cambio pendiente fuera eliminado.
+    usuario_id INTEGER NOT NULL UNIQUE REFERENCES usuario(id) ON DELETE CASCADE,
+
+    -- El destino. No se copia a usuario.correo hasta el canje: mientras esta fila exista, la cuenta
+    -- sigue funcionando con el correo de siempre.
+    correo_nuevo VARCHAR(150) NOT NULL,
+
+    -- El HASH SHA-256 del token, nunca el token, igual que en token_recuperacion: el valor original
+    -- solo existe dentro del correo.
+    token_hash TEXT NOT NULL UNIQUE,
+
+    fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT now(),
+    fecha_expiracion TIMESTAMPTZ NOT NULL,
+
+    -- Un solo uso se consigue BORRANDO la fila al canjear, no marcándola.
+    CONSTRAINT chk_cambio_correo_expiracion CHECK (fecha_expiracion > fecha_creacion)
+);
+
+-- REFRESH_TOKEN --
+-- Sesión persistente: el access token (JWT) dura una hora y viaja en cada request; este dura meses y
+-- solo sirve para pedir uno nuevo. Así recepción, que tiene la pantalla abierta toda la jornada, no
+-- vuelve a escribir credenciales.
+--
+-- Por qué no basta con alargar el JWT: un token de vida larga que viaja en cada petición y que NO se
+-- puede revocar es el peor caso posible si alguien lo captura. Esta tabla existe justamente para
+-- poder revocar.
+--
+-- Tres diferencias con token_recuperacion y token_cambio_correo, y las tres son deliberadas:
+CREATE TABLE refresh_token (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+    -- 1. SIN UNIQUE, a diferencia de las otras dos tablas de token. Una persona tiene varias sesiones
+    --    vivas a la vez: entra desde el celular y desde el computador de recepción, y cerrar una no
+    --    puede tumbar la otra.
+    usuario_id INTEGER NOT NULL REFERENCES usuario(id) ON DELETE CASCADE,
+
+    -- Hash SHA-256, nunca el token. Igual que en el resto del sistema: el valor en claro solo existe
+    -- en el dispositivo de la persona.
+    token_hash TEXT NOT NULL UNIQUE,
+
+    expira_en TIMESTAMPTZ NOT NULL,
+
+    -- 2. Se REVOCA marcando, no borrando la fila. Las otras tablas borran porque un token gastado no
+    --    dice nada; acá sí dice: si llega un refresh token que ya fue rotado, alguien está usando una
+    --    copia vieja, y eso es señal de que el token se filtró. Con la fila borrada, ese intento
+    --    parecería un token inventado cualquiera.
+    revocado_en TIMESTAMPTZ,
+
+    -- 3. Se guarda de dónde vino, para poder mostrar "sesiones activas" y para que revocar una sesión
+    --    concreta signifique algo para quien la mira. Solo informativo: nunca se valida contra él
+    --    —cambia entre versiones del navegador— y no es un factor de seguridad.
+    user_agent VARCHAR(255),
+
+    fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chk_refresh_token_expiracion CHECK (expira_en > fecha_creacion)
+);
+-- Para revocar de golpe todas las sesiones de alguien: pasa al cambiar la contraseña y al desactivar
+-- la cuenta. Sin índice sería un recorrido completo de la tabla cada vez.
+CREATE INDEX idx_refresh_token_usuario ON refresh_token (usuario_id);
 
 -- TARIFA --
 CREATE TABLE tarifa (
     id INTEGER PRIMARY KEY DEFAULT 1,
-    monto NUMERIC(10,2) NOT NULL,
+    monto NUMERIC(10,0) NOT NULL,
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
     actualizado_por INTEGER REFERENCES usuario(id),
     CONSTRAINT chk_tarifa_fila_unica CHECK (id = 1),
@@ -209,7 +371,7 @@ CREATE TABLE configuracion_cola (
     id INTEGER PRIMARY KEY DEFAULT 1,
     personas_por_turno INTEGER NOT NULL DEFAULT 1,
     minutos_margen_ingreso INTEGER NOT NULL DEFAULT 60, -- cuánto antes del inicio se puede hacer check-in
-    minutos_visibilidad_pagos INTEGER NOT NULL DEFAULT 2, -- minutos que alguien aparece en la lista de "ya está pago".
+    minutos_visibilidad_pagos INTEGER NOT NULL DEFAULT 1, -- minutos que alguien aparece en la lista de "ya está pago".
     actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
     actualizado_por INTEGER REFERENCES usuario(id),
     CONSTRAINT chk_configuracion_cola_fila_unica CHECK (id = 1),
@@ -232,7 +394,7 @@ CREATE TABLE historial_cambio (
 CREATE INDEX idx_historial_tabla_registro ON historial_cambio (tabla_afectada, registro_id);
 
 -- Datos iniciales
-INSERT INTO rol (nombre) VALUES ('ADMIN'), ('MIEMBRO'), ('PROFESOR');
+INSERT INTO rol (nombre) VALUES ('ADMIN'), ('MIEMBRO'), ('PROFESOR'), ('RECEPCIONISTA'), ('PSR_TERMINAL');
 INSERT INTO tarifa (id, monto) VALUES (1, 4000);
 INSERT INTO configuracion_cola (id, personas_por_turno) VALUES (1, 1);
 INSERT INTO metodo_pago (nombre) VALUES ('EFECTIVO'), ('TRANSFERENCIA');
@@ -245,4 +407,17 @@ VALUES (999999999, 'CC', 'SENTINEL-DELETED-000', 'Usuario', 'Eliminado', '000000
 INSERT INTO usuario (id, numero_documento, correo, password_hash, persona_id, activo)
     OVERRIDING SYSTEM VALUE
 VALUES (999999999, 'SENTINEL-DELETED-000', 'sentinel-deleted@psr.local', '!SENTINEL_NO_LOGIN_POSSIBLE!', 999999999, false);
+
+-- Usuario SISTEMA (id fijo 999999998)
+--
+-- Objetivo: las acciones automáticas (hoy, el cierre de sesiones vencidas del scheduler) tienen que
+-- quedar en historial_cambio, y esa tabla exige usuario_id NOT NULL con FK a usuario. Sin una cuenta
+-- a la que atribuirlas, no habría forma de auditarlas.
+--
+-- No puede iniciar sesión: activo = false y el hash no corresponde a ninguna contraseña.
+-- Sin persona asociada y sin roles, así que no lo alcanza trg_validar_persona_requerida.
+-- Distinto del sentinel 999999999, que representa a las personas eliminadas.
+INSERT INTO usuario (id, correo, password_hash, activo)
+    OVERRIDING SYSTEM VALUE
+VALUES (999999998, 'sistema@psr.local', '!SYSTEM_NO_LOGIN_POSSIBLE!', false);
 

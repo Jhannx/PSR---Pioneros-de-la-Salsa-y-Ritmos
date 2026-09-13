@@ -18,8 +18,12 @@ public class EmergencyContact {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "persona_id", nullable = false, unique = true)
+    /**
+     * ManyToOne, no OneToOne: hasta cinco contactos comparten persona. El {@code unique = true} que
+     * llevaba antes esta columna era el que imponía la relación 1:1.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "persona_id", nullable = false)
     private Person person;
 
     @Column(name = "nombre", length = 150)
@@ -28,8 +32,7 @@ public class EmergencyContact {
     @Column(name = "telefono", length = 20)
     private String phone;
 
-    @Column(name = "observaciones")
-    private String observations;
+    // observations se fue a Person.healthObservations: es un dato de la persona, no del contacto.
 
     @Column(name = "actualizado_en", nullable = false)
     private OffsetDateTime updatedAt;

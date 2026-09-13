@@ -12,6 +12,7 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.session.repository.SessionS
 import com.jhanp.psraerobicsbackend.modules.aerobics.session.service.interfaces.ISessionService;
 import com.jhanp.psraerobicsbackend.modules.user.repository.UserRepository;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
+import com.jhanp.psraerobicsbackend.shared.validation.DateRanges;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -83,8 +84,22 @@ public class SessionService implements ISessionService {
                 .toList();
     }
 
+    /**
+     * El rango es opcional aquí, a diferencia del resto de listados por fecha: sin filtros devuelve
+     * todas las sesiones, que es lo que pide la pantalla al abrirse, antes de que nadie elija nada.
+     * <p>
+     * Pero o van los dos o no va ninguno. Con uno solo el rango queda abierto por un extremo y no hay
+     * una interpretación evidente —¿desde ahí hasta hoy? ¿hasta siempre?—, así que se rechaza en vez
+     * de adivinar.
+     */
     @Override
     public Page<SessionResponse> findBetween(LocalDate from, LocalDate to, Pageable pageable) {
+        if (from == null && to == null) {
+            return sessionRepository.findAllByOrderByDateDescStartTimeDesc(pageable)
+                    .map(sessionMapper::toResponse);
+        }
+
+        DateRanges.require(from, to);
         return sessionRepository.findByDateBetweenOrderByDateDescStartTimeDesc(from, to, pageable)
                 .map(sessionMapper::toResponse);
     }
@@ -140,6 +155,7 @@ public class SessionService implements ISessionService {
 
     @Override
     public Page<SessionSummaryViewResponse> getSummariesBetween(LocalDate from, LocalDate to, Pageable pageable) {
+        DateRanges.require(from, to);
         return sessionSummaryViewRepository.findByDateBetweenOrderByDateDesc(from, to, pageable)
                 .map(sessionViewMapper::toResponse);
     }

@@ -1,5 +1,6 @@
 package com.jhanp.psraerobicsbackend.modules.aerobics.attendance.view;
 
+import com.jhanp.psraerobicsbackend.modules.aerobics.checkin.enums.CheckinMethod;
 import jakarta.persistence.*;
 import lombok.Getter;
 import org.hibernate.annotations.Immutable;
@@ -36,8 +37,13 @@ public class AttendanceHistoryView {
     @Column(name = "hora_llegada")
     private OffsetDateTime arrivalTime;
 
-    @Column(name = "metodo_checkin")
-    private String checkinMethod;
+    /**
+     * CheckinMethod y no String: ver la nota larga en TodayQueueView. Mismo fallo, mismo origen —
+     * MapStruct generaba {@code valueOf("DOCUMENTO")} contra constantes en inglés y tumbaba el
+     * historial de asistencias entero.
+     */
+    @Column(name = "metodo_checkin", columnDefinition = "metodo_checkin_enum")
+    private CheckinMethod checkinMethod;
 
     @Column(name = "monto_cobrado")
     private BigDecimal amountCharged;

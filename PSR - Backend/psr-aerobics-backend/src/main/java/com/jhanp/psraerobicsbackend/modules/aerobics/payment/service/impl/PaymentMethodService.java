@@ -75,6 +75,16 @@ public class PaymentMethodService implements IPaymentMethodService {
         return paymentMethodMapper.toResponse(paymentMethodRepository.save(paymentMethod));
     }
 
+    @Override
+    @Transactional
+    public PaymentMethodResponse setActive(Integer id, boolean active) {
+        PaymentMethod paymentMethod = findEntity(id);
+        paymentMethod.setActive(active);
+
+        log.info("Método de pago ID: {} {}", id, active ? "activado" : "desactivado");
+        return paymentMethodMapper.toResponse(paymentMethodRepository.save(paymentMethod));
+    }
+
     private PaymentMethod findEntity(Integer id) {
         return paymentMethodRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Método de pago no encontrado con ID: " + id));

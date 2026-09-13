@@ -13,16 +13,17 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.payment.repository.AccountM
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.repository.PaymentMethodRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.repository.PendingChangeViewRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.service.interfaces.IAccountMovementService;
+import com.jhanp.psraerobicsbackend.modules.aerobics.queue.event.QueueChangedEvent;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
 import com.jhanp.psraerobicsbackend.shared.persistence.AuditContextRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -38,6 +39,7 @@ public class AccountMovementService implements IAccountMovementService {
     private final AuditContextRepository auditContextRepository;
     private final AccountMovementMapper accountMovementMapper;
     private final PendingChangeViewMapper pendingChangeViewMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -59,6 +61,11 @@ public class AccountMovementService implements IAccountMovementService {
                 .orElseThrow(() -> new IllegalStateException("El abono no se registró correctamente."));
 
         log.info("Abono registrado: ID {}, Persona {}, Monto {}", movement.getId(), request.personId(), request.amountApplied());
+
+        // Un abono mueve el saldo del panel y puede hacer aparecer a la persona en la fila de
+        // prepagados. Va sin sesión: un pago por adelantado no cuelga de ninguna llegada.
+        eventPublisher.publishEvent(QueueChangedEvent.payment(null));
+
         return accountMovementMapper.toResponse(movement);
     }
 
@@ -73,10 +80,10 @@ public class AccountMovementService implements IAccountMovementService {
                 request.note()
         );
 
-        // Patrón H: El reembolso es el último movimiento relacionado con el original
-        AccountMovement refund = accountMovementRepository.findAll().stream()
-                .filter(m -> originalMovementId.equals(m.getOriginalMovement() != null ? m.getOriginalMovement().getId() : null))
-                .max(Comparator.comparing(AccountMovement::getTimestamp))
+        // Patrón H: El reembolso es el último movimiento relacionado con el original. Lo resuelve la
+        // consulta, no un filtro en memoria sobre findAll(): la tabla de movimientos crece sin techo.
+        AccountMovement refund = accountMovementRepository
+                .findTopByOriginalMovementIdOrderByTimestampDesc(originalMovementId)
                 .orElseThrow(() -> new IllegalStateException("El reembolso no se registró correctamente."));
 
         log.info("Reembolso registrado: ID {}, Original ID {}, Monto {}", refund.getId(), originalMovementId, request.amount());

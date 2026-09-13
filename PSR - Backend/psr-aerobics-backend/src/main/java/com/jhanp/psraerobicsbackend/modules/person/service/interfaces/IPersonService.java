@@ -12,25 +12,39 @@ import org.springframework.data.domain.Pageable;
 public interface IPersonService {
 
     /**
-     * Alta de persona: sp_registrar_persona + sp_registrar_usuario_para_persona en la misma
-     * transacción. Toda persona nace con cuenta de acceso y rol MIEMBRO.
+     * Alta de la persona vía sp_registrar_persona, y nada más. Devuelve el id que asignó el
+     * procedimiento.
+     * <p>
+     * <b>No crea la cuenta de acceso.</b> Quien coordina el alta completa —persona, cuenta y correo de
+     * bienvenida, todo en una transacción— es {@code RegisterService}. Aquí solo vive la persona.
      * <p>
      * source va como parámetro y no dentro del request porque lo decide la ruta (ADMIN en
-     * /api/personas, AUTOREGISTRO en /api/personas/autoregistro). El hash de la contraseña se
-     * calcula en Java antes de la segunda llamada; si el request no trae password, se hashea el
-     * número de documento.
-     * <p>
-     * Los procedimientos solo devuelven ids: registeredAt y active salen de releer la fila
-     * (patrón H).
+     * /api/personas, AUTOREGISTRO en /api/personas/autoregistro): si viniera en el body, cualquiera
+     * podría marcar un registro manual como autoregistro.
      */
-    PersonResponse create(PersonRequest request, RegistrationSource source);
+    Integer createPerson(PersonRequest request, RegistrationSource source);
+
+    /**
+     * Arma el Response de una persona ya creada, resolviendo el userId de su cuenta. Se expone porque
+     * {@code RegisterService} lo necesita para responder tras el alta.
+     */
+    PersonResponse findById(Integer id);
 
     /**
      * Edición de datos básicos por JPA. No toca source, registeredAt, active ni la contraseña.
      */
     PersonResponse update(Integer id, PersonUpdateRequest request);
 
-    PersonResponse findById(Integer id);
+    /**
+     * Alergias, condiciones y demás notas de salud de la persona. Va aparte de {@link #update} por
+     * permisos: aquel es de mostrador y reescribe documento, nombre y teléfono, así que abrirlo al
+     * propio miembro le dejaría cambiarse el documento. Este solo toca esta columna.
+     * <p>
+     * Antes vivía en el contacto de emergencia, cuando había uno solo por persona.
+     *
+     * @param healthObservations admite null o blanco: borrar lo escrito es válido
+     */
+    PersonResponse updateHealthObservations(Integer id, String healthObservations);
 
     PersonResponse findByDocumentNumber(String documentNumber);
 

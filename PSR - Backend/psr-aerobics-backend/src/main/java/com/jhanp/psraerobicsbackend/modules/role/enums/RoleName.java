@@ -1,14 +1,12 @@
 package com.jhanp.psraerobicsbackend.modules.role.enums;
 
-/**
- * Las constantes están en inglés, pero los valores de rol_nombre_enum siguen en español: el esquema
- * no se toca. La traducción en las dos direcciones la hace {@link RoleNameConverter}, y hacia los
- * procedimientos almacenados hay que pasar {@link #getDbValue()}, nunca name().
- */
+/** Enum de roles de seguridad y sus valores persistidos. */
 public enum RoleName {
     ADMIN("ADMIN"),
     MEMBER("MIEMBRO"),
-    TEACHER("PROFESOR");
+    TEACHER("PROFESOR"),
+    RECEPTIONIST("RECEPCIONISTA"),
+    PSR_TERMINAL("PSR_TERMINAL");
 
     private final String dbValue;
 

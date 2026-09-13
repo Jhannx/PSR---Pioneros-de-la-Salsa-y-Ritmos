@@ -8,12 +8,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import com.jhanp.psraerobicsbackend.security.Authorities;
+import com.jhanp.psraerobicsbackend.shared.validation.SearchTerms;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -26,6 +30,9 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/usuarios")
+// Las cuentas de acceso son administración. La excepción es el selector de profesores, que hace falta
+// para asignar quién dicta una sesión.
+@PreAuthorize(Authorities.ADMIN)
 @RequiredArgsConstructor
 @Validated
 public class UserController {
@@ -38,15 +45,28 @@ public class UserController {
      * Va antes de /{id} para que la ruta literal gane sobre la variable de path.
      */
     @GetMapping("/profesores")
+    @PreAuthorize(Authorities.CLASS_OPS)
     public ResponseEntity<List<TeacherResponse>> findAssignableTeachers() {
 
         return ResponseEntity.ok(userService.findAssignableTeachers());
     }
 
+    /**
+     * Listado paginado de cuentas. Con ?buscar= filtra por el nombre de la persona, su documento o el
+     * correo, en un único campo — el mismo criterio que el listado de personas.
+     */
     @GetMapping
-    public ResponseEntity<Page<UserResponse>> findAll(@PageableDefault(size = 20) Pageable pageable) {
+    public ResponseEntity<Page<UserResponse>> findAll(
+            @RequestParam(required = false) String buscar,
+            @PageableDefault(size = 20) Pageable pageable) {
 
-        return ResponseEntity.ok(userService.findAll(pageable));
+        String term = SearchTerms.normalize(buscar);
+
+        Page<UserResponse> cuentas = (term == null)
+                ? userService.findAll(pageable)
+                : userService.search(term, pageable);
+
+        return ResponseEntity.ok(cuentas);
     }
 
     @GetMapping("/{id}")

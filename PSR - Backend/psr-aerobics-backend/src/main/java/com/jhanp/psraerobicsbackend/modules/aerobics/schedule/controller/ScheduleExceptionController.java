@@ -8,7 +8,9 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,6 +29,8 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/horarios")
+// Igual que el horario: se consulta en la sala, se modifica desde administración.
+@PreAuthorize(Authorities.STAFF)
 @RequiredArgsConstructor
 @Validated
 public class ScheduleExceptionController {
@@ -37,6 +41,7 @@ public class ScheduleExceptionController {
      * Registra una excepción de fecha para un horario específico.
      */
     @PostMapping("/{horarioId}/excepciones")
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<ScheduleExceptionResponse> create(
             @PathVariable("horarioId") @Positive(message = "El ID del horario debe ser positivo") Integer scheduleId,
             @Valid @RequestBody ScheduleExceptionRequest request) {
@@ -79,6 +84,7 @@ public class ScheduleExceptionController {
      * Elimina una excepción de horario.
      */
     @DeleteMapping("/excepciones/{id}")
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<Void> delete(
             @PathVariable @Positive(message = "El ID de la excepción debe ser positivo") Integer id) {
 
