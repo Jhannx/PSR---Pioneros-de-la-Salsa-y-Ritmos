@@ -1,227 +1,259 @@
 import { useState, useEffect } from "react";
-import { Users, Sparkles, CheckCircle2 } from "lucide-react";
-import { formatTimeShort as formatTime } from "../../utils/date";
+import { ArrowLeft, Wifi, WifiOff } from "lucide-react";
 import { formatHeaderDateLong as formatHeaderDate } from "../../utils/date";
-import { formatHeaderTime24h as formatHeaderTime } from "../../utils/date";
 import useClock from "../../hooks/useClock";
-import { minutesAgo, turnMessage } from "../../features/lobby/utils";
+import { useNavigate } from "react-router-dom";
+import { createQueueSocketClient } from "../../services/websocketService";
+import { queueService } from "../../services/queueService";
 
-// Nombre fijo — constante de marca, no un dato de tabla (ver nota en el
-// chat: mientras el sistema sea de un solo negocio, esto no necesita
-// backend). Si algún día hay multi-negocio, esto sí pasaría a venir de
-// una configuración por negocio.
-const ACADEMY_NAME = "PSR Aeróbicos";
-
-const initialQueue = [
-  { id: 1, firstName: "Juan", lastName: "Martínez", acceptedAt: minutesAgo(9) },
-  { id: 2, firstName: "María", lastName: "López", acceptedAt: minutesAgo(7) },
-  { id: 3, firstName: "Carlos", lastName: "Ruiz", acceptedAt: minutesAgo(5) },
-  { id: 4, firstName: "Ana", lastName: "Torres", acceptedAt: minutesAgo(3) },
-  { id: 5, firstName: "Sofía", lastName: "Ramírez", acceptedAt: minutesAgo(1) },
-];
-
-// Ya tenían saldo cubierto ANTES de llegar (vista_fila_prepagada) — ver
-// Notas_Frontend_Pendientes.md punto 5 para el dinamismo real.
-const initialPrepaid = [{ id: 201, firstName: "Diana", lastName: "Ortiz" }];
-
-const DEMO_NAME_POOL = [
-  { firstName: "Pedro", lastName: "Gómez" },
-  { firstName: "Luisa", lastName: "Rojas" },
-  { firstName: "Andrés", lastName: "Cano" },
-];
-const DEMO_PREPAID_POOL = [
-  { firstName: "Camilo", lastName: "Restrepo" },
-  { firstName: "Paola", lastName: "Jiménez" },
-];
-
-export default function LobbyQueueDisplayPage({ turnRule = { count: 2 } }) {
+export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
   const now = useClock();
-  const [queue, setQueue] = useState(initialQueue);
-  const [nextId, setNextId] = useState(initialQueue.length + 1);
-  const [poolIndex, setPoolIndex] = useState(0);
+  const navigate = useNavigate();
 
-  const [prepaid, setPrepaid] = useState(initialPrepaid);
-  const [nextPrepaidId, setNextPrepaidId] = useState(initialPrepaid.length + 201);
-  const [prepaidPoolIndex, setPrepaidPoolIndex] = useState(0);
-
-  const [calledGroupIds, setCalledGroupIds] = useState([]);
+  const [prepaidList, setPrepaidList] = useState([]);
+  const [waitingList, setWaitingList] = useState([]);
+  const [expiringIds, setExpiringIds] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const stillWaiting = calledGroupIds.filter((id) => queue.some((p) => p.id === id));
-    if (stillWaiting.length === 0) {
-      const ordered = [...queue].sort((a, b) => a.acceptedAt - b.acceptedAt);
-      setCalledGroupIds(ordered.slice(0, turnRule.count).map((p) => p.id));
-    } else if (stillWaiting.length !== calledGroupIds.length) {
-      setCalledGroupIds(stillWaiting);
+    // 1. Carga inicial vía REST de producción
+    async function fetchInitialData() {
+      try {
+        const [waitingData, prepaidData] = await Promise.allSettled([
+          queueService.getWaiting(),
+          queueService.getPrepaid(),
+        ]);
+
+        if (waitingData.status === "fulfilled") {
+          const list = Array.isArray(waitingData.value) ? waitingData.value : waitingData.value?.content || [];
+          setWaitingList(list);
+        }
+        if (prepaidData.status === "fulfilled") {
+          const list = Array.isArray(prepaidData.value) ? prepaidData.value : prepaidData.value?.content || [];
+          setPrepaidList(list);
+        }
+      } catch (err) {
+        console.error("Error al cargar datos iniciales de la cola desde la API:", err);
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue, turnRule.count]);
+    fetchInitialData();
 
-  const ordered = [...queue].sort((a, b) => a.acceptedAt - b.acceptedAt);
-  const hasPrepaid = prepaid.length > 0;
+    // 2. Conexión WebSocket STOMP directa en producción
+    const client = createQueueSocketClient({
+      onEsperaQueue: (data) => {
+        setIsConnected(true);
+        const list = Array.isArray(data) ? data : data?.content || [];
+        setWaitingList(list);
+      },
+      onPrepaidQueue: (data) => {
+        setIsConnected(true);
+        const list = Array.isArray(data) ? data : data?.content || [];
+        setPrepaidList(list);
+      },
+      onError: () => {
+        setIsConnected(false);
+      },
+    });
 
-  function demoAddPerson() {
-    const template = DEMO_NAME_POOL[poolIndex % DEMO_NAME_POOL.length];
-    setPoolIndex((i) => i + 1);
-    setQueue((prev) => [...prev, { id: nextId, ...template, acceptedAt: new Date() }]);
-    setNextId((n) => n + 1);
+    try {
+      client.activate();
+    } catch (e) {
+      console.warn("WebSocket activate error:", e);
+    }
+
+    return () => {
+      try {
+        client.deactivate();
+      } catch {
+        // silent cleanup
+      }
+    };
+  }, []);
+
+  function handleHidePrepaid(checkinId) {
+    setExpiringIds((ids) => [...ids, checkinId]);
+    setTimeout(() => {
+      setPrepaidList((prev) => prev.filter((p) => (p.checkinId || p.id) !== checkinId));
+      setExpiringIds((ids) => ids.filter((id) => id !== checkinId));
+    }, 400);
   }
 
-  function demoMarkPaid(id) {
-    setQueue((prev) => prev.filter((p) => p.id !== id));
-  }
+  const hasPrepaid = prepaidList.length > 0;
+  const sideSpan = hasPrepaid ? "lg:col-span-4" : "lg:col-span-6";
 
-  function demoAddPrepaid() {
-    const template = DEMO_PREPAID_POOL[prepaidPoolIndex % DEMO_PREPAID_POOL.length];
-    setPrepaidPoolIndex((i) => i + 1);
-    setPrepaid((prev) => [...prev, { id: nextPrepaidId, ...template }]);
-    setNextPrepaidId((n) => n + 1);
-  }
+  const formattedTime = now.toLocaleTimeString("es-CO", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
 
-  function demoRemovePrepaid(id) {
-    setPrepaid((prev) => prev.filter((p) => p.id !== id));
-  }
+  const calledQueue = waitingList.slice(0, peoplePerTurn);
+  const remainingQueue = waitingList.slice(peoplePerTurn);
 
   return (
-    <div className="min-h-screen w-full bg-neutral-950 flex flex-col">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@500;600;700;800&display=swap');
-        .font-display { font-family: 'Fraunces', serif; font-optical-sizing: auto; }
-        .font-body { font-family: 'Manrope', sans-serif; }
-        .tabular { font-variant-numeric: tabular-nums; }
-      `}</style>
+    <div className="min-h-screen w-full bg-neutral-950 text-white flex flex-col p-4 md:p-6 font-body relative overflow-hidden">
+      <button
+        onClick={() => navigate("/lobby/panel")}
+        className="absolute top-4 left-4 flex items-center gap-1.5 text-neutral-400 hover:text-white text-xs bg-neutral-900 border border-neutral-800 px-3 py-1.5 rounded-xl transition-colors z-20"
+      >
+        <ArrowLeft size={14} /> Salir a Panel
+      </button>
 
-      {/* Cabecera — identidad de la academia + reloj en vivo */}
-      <header className="font-body flex items-center justify-between px-10 py-6 border-b border-neutral-800/80">
-        <h1 className="font-display text-3xl text-white tracking-tight">{ACADEMY_NAME}</h1>
-        <div className="text-right">
-          <p className="text-neutral-500 text-sm capitalize">{formatHeaderDate(now)}</p>
-          <p className="tabular text-white text-2xl font-bold tracking-wide">{formatHeaderTime(now)}</p>
-        </div>
-      </header>
-
-      {/* Cuerpo — A|B lado a lado. B solo ocupa espacio si tiene gente;
-          si no, A se expande solo (sin dejar un hueco vacío al lado). */}
-      <div className="font-body flex-1 flex overflow-hidden">
-        {/* A — fila de ingreso, pendientes de confirmación */}
-        <main className={`flex flex-col px-10 py-8 overflow-y-auto ${hasPrepaid ? "flex-[0.68]" : "flex-1"}`}>
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <Users className="text-neutral-500" size={30} />
-              <h2 className="text-2xl font-bold text-white">Fila de ingreso</h2>
-            </div>
-            <span className="text-neutral-500 text-lg">{ordered.length} en espera</span>
-          </div>
-
-          <div className="bg-violet-500/10 border-2 border-violet-500/40 rounded-3xl px-7 py-4 mb-6 flex items-center gap-3">
-            <Sparkles className="text-violet-400 shrink-0" size={22} />
-            <p className="text-violet-300 font-bold text-lg">{turnMessage(turnRule.count)}</p>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {ordered.map((person, index) => {
-              const isYourTurn = calledGroupIds.includes(person.id);
-              return (
-                <div
-                  key={person.id}
-                  className={`flex items-center gap-5 px-6 py-4 rounded-2xl border-2 transition-colors ${
-                    isYourTurn ? "bg-violet-500/15 border-violet-500" : "bg-neutral-900 border-neutral-800"
-                  }`}
-                >
-                  <span
-                    className={`w-9 h-9 rounded-full flex items-center justify-center text-base font-bold shrink-0 ${
-                      isYourTurn ? "bg-violet-500 text-neutral-950" : "bg-neutral-800 text-neutral-400"
-                    }`}
-                  >
-                    {index + 1}
-                  </span>
-                  <p className={`flex-1 text-xl font-bold ${isYourTurn ? "text-white" : "text-neutral-200"}`}>
-                    {person.firstName} {person.lastName}
-                  </p>
-                  <span className="tabular text-neutral-600 text-sm shrink-0">{formatTime(person.acceptedAt)}</span>
-                </div>
-              );
-            })}
-            {ordered.length === 0 && (
-              <div className="text-center py-16 text-neutral-600 text-lg">No hay nadie en fila en este momento.</div>
-            )}
-          </div>
-        </main>
-
-        {/* B — ya pagaron con anticipación. Solo existe en el DOM cuando
-            hay al menos una persona; su desaparición es lo que hace que
-            A vuelva a ocupar el 100% del ancho. */}
-        {hasPrepaid && (
-          <aside className="flex-[0.32] border-l border-neutral-800/80 bg-neutral-900/40 px-8 py-8 overflow-y-auto">
-            <div className="flex items-center gap-3 mb-6">
-              <CheckCircle2 className="text-emerald-400" size={24} />
-              <h2 className="text-xl font-bold text-emerald-400">Ya pagaron</h2>
-            </div>
-            <p className="text-emerald-300/70 text-sm mb-6 -mt-3">Pasan directo, sin esperar turno.</p>
-            <div className="flex flex-col gap-3">
-              {prepaid.map((person) => (
-                <div
-                  key={person.id}
-                  className="flex items-center gap-4 px-5 py-4 rounded-2xl border-2 bg-emerald-500/10 border-emerald-500/40"
-                >
-                  <CheckCircle2 className="text-emerald-400 shrink-0" size={20} />
-                  <p className="text-lg font-bold text-white leading-tight">
-                    {person.firstName}
-                    <br />
-                    {person.lastName}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </aside>
-        )}
+      <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
+        <span
+          className={`flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-full border ${
+            isConnected
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+              : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+          }`}
+        >
+          {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+          {isConnected ? "WS En Vivo" : "Desconectado"}
+        </span>
       </div>
 
-      {/* Controles de demo — no forman parte de la pantalla real de TV. */}
-      <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2 opacity-40 hover:opacity-100 transition-opacity">
-        {calledGroupIds.length > 0 && (
-          <div className="flex gap-2">
-            {calledGroupIds.map((id) => {
-              const person = queue.find((p) => p.id === id);
-              if (!person) return null;
-              return (
-                <button
-                  key={id}
-                  onClick={() => demoMarkPaid(id)}
-                  className="text-xs bg-violet-500/20 text-violet-300 px-3 py-2 rounded-lg border border-violet-500/40 font-body"
-                >
-                  Demo: confirmar a {person.firstName}
-                </button>
-              );
-            })}
+      <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-4 mt-8 sm:mt-0">
+        <div>
+          <h1 className="text-xl font-bold text-white tracking-tight">PSR • Aeróbicos — Fila Pública</h1>
+          <p className="text-neutral-400 text-xs mt-0.5">
+            Pioneros de la Salsa y Ritmos · Estado en tiempo real
+          </p>
+        </div>
+        <div className="text-right text-neutral-400 text-xs font-semibold">
+          <div>{formatHeaderDate(now)}</div>
+          <div className="text-emerald-400 font-bold font-mono text-sm">{formattedTime}</div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
+        {/* Sección 1: Pasando a Recepción (Llamados) */}
+        <div className={`${sideSpan} bg-purple-950/20 border border-purple-500/40 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300`}>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-bold text-purple-300">Pasar a Recepción</h2>
+              <span className="text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">
+                {calledQueue.length} llamado(s)
+              </span>
+            </div>
+            <p className="text-purple-300/80 text-xs mb-3">
+              Acércate al mostrador de recepción para ingresar.
+            </p>
+
+            {calledQueue.length === 0 ? (
+              <div className="p-6 border border-dashed border-purple-500/20 rounded-2xl text-center text-purple-300/60 text-xs">
+                Esperando llamado de turno...
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {calledQueue.map((person, idx) => {
+                  const fullName = `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.name || "Alumno";
+                  return (
+                    <div
+                      key={person.checkinId || person.id || idx}
+                      className="bg-purple-600/30 border-2 border-purple-400 p-3.5 rounded-2xl flex items-center justify-between text-white shadow-lg shadow-purple-500/10"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-extrabold w-6 h-6 rounded-full bg-purple-400 text-neutral-950 flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <span className="text-base font-bold">{fullName}</span>
+                      </div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-purple-500/30 px-2 py-0.5 rounded-full text-purple-200">
+                        ¡Llamado!
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sección 2: Prepagados (Pasan Directo) */}
+        {hasPrepaid && (
+          <div className="lg:col-span-4 bg-emerald-950/20 border border-emerald-500/40 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-bold text-emerald-300">Pasan Directo (Prepagados)</h2>
+                <span className="text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                  {prepaidList.length} persona(s)
+                </span>
+              </div>
+              <p className="text-emerald-300/80 text-xs mb-3">
+                Sin pasar por recepción. Ingresan directo a la sala.
+              </p>
+
+              <div className="space-y-2">
+                {prepaidList.map((person) => {
+                  const checkinId = person.checkinId || person.id;
+                  const fullName = `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.name || "Alumno";
+                  const isExpiring = expiringIds.includes(checkinId);
+                  return (
+                    <div
+                      key={checkinId}
+                      className={`bg-emerald-900/40 border border-emerald-500/50 p-3.5 rounded-2xl flex items-center justify-between text-emerald-200 transition-all duration-300 ${
+                        isExpiring ? "opacity-0 scale-95" : "opacity-100 scale-100"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-6 h-6 rounded-full bg-emerald-500 text-neutral-950 flex items-center justify-center font-bold text-xs shrink-0">
+                          ✓
+                        </div>
+                        <span className="text-base font-bold text-white">{fullName}</span>
+                      </div>
+                      <button
+                        onClick={() => handleHidePrepaid(checkinId)}
+                        title="Ocultar de pantalla"
+                        className="text-neutral-500 hover:text-emerald-300 text-xs px-2 py-0.5 rounded-md transition-colors"
+                      >
+                        Ocultar
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
-        {prepaid.length > 0 && (
-          <div className="flex gap-2">
-            {prepaid.map((person) => (
-              <button
-                key={person.id}
-                onClick={() => demoRemovePrepaid(person.id)}
-                className="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-2 rounded-lg border border-emerald-500/40 font-body"
-              >
-                Demo: entrar {person.firstName}
-              </button>
-            ))}
+
+        {/* Sección 3: En Espera (Fila General) */}
+        <div className={`${sideSpan} bg-neutral-900/60 border border-neutral-800 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300`}>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-bold text-white">En Espera (Fila General)</h2>
+              <span className="text-xs font-semibold text-neutral-400">
+                {remainingQueue.length} en espera
+              </span>
+            </div>
+            <p className="text-neutral-400 text-xs mb-3">
+              Permanece en sala de espera hasta escuchar tu llamado.
+            </p>
+
+            {remainingQueue.length === 0 ? (
+              <div className="p-6 border border-dashed border-neutral-800 rounded-2xl text-center text-neutral-500 text-xs">
+                No hay más personas en la fila de espera.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {remainingQueue.map((person, idx) => {
+                  const fullName = `${person.firstName || ""} ${person.lastName || ""}`.trim() || person.name || "Alumno";
+                  return (
+                    <div
+                      key={person.checkinId || person.id || idx}
+                      className="bg-neutral-950/80 border border-neutral-800 p-3 rounded-2xl flex items-center justify-between text-neutral-300"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-bold text-neutral-500 w-5 text-center">
+                          #{peoplePerTurn + idx + 1}
+                        </span>
+                        <span className="text-sm font-semibold text-white">{fullName}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-        <div className="flex gap-2">
-          <button
-            onClick={demoAddPerson}
-            className="text-xs bg-neutral-800 text-neutral-400 px-3 py-2 rounded-lg border border-neutral-700 font-body"
-          >
-            + Demo: nueva persona
-          </button>
-          <button
-            onClick={demoAddPrepaid}
-            className="text-xs bg-neutral-800 text-neutral-400 px-3 py-2 rounded-lg border border-neutral-700 font-body"
-          >
-            + Demo: prepagado
-          </button>
         </div>
       </div>
     </div>

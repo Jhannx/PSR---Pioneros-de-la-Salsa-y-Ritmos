@@ -1,53 +1,76 @@
 import { useState } from "react";
-import { CreditCard, AlertCircle, RotateCcw, UserPlus, CheckCircle2, Users } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CreditCard, AlertCircle, RotateCcw, UserPlus, CheckCircle2, ArrowLeft } from "lucide-react";
 import { formatTimeWithSeconds as formatTime } from "../../utils/date";
-
-// Mock de documentos ya registrados — solo para simular la búsqueda del
-// kiosko. En producción esto es una consulta al backend (RF-03, método
-// Documento).
-const KNOWN_DOCUMENTS = ["1001234567", "1002345678", "1003456789", "1004567890"];
+import { queueService } from "../../services/queueService";
 
 export default function LobbyCheckinPage() {
-  const [step, setStep] = useState("documento"); // documento | no_encontrado | confirmado | redirigiendo
-  const [documento, setDocumento] = useState("");
-  // Hora exacta en la que la persona dio "Aceptar" — es el dato objetivo
-  // que define su posición real en la fila, sin depender de percepciones
-  // ("yo llegué primero"). Se registra en el momento del click, no después.
-  const [acceptedAt, setAcceptedAt] = useState(null);
-  const [queuePosition] = useState(4); // mock: posición asignada al ingresar a la cola
+  const navigate = useNavigate();
 
-  function handleSubmit() {
+  const [step, setStep] = useState("documento"); // documento | no_encontrado | confirmado
+  const [documento, setDocumento] = useState("");
+  const [acceptedAt, setAcceptedAt] = useState(null);
+  const [matchedPerson, setMatchedPerson] = useState(null);
+  const [assignedPos, setAssignedPos] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  async function handleSubmit() {
     const trimmed = documento.trim();
-    if (!trimmed) return;
-    if (KNOWN_DOCUMENTS.includes(trimmed)) {
+    if (!trimmed || loading) return;
+
+    setLoading(true);
+    setErrorMsg("");
+
+    try {
+      // El backend resuelve la persona por número de documento y hace el check-in en una sola llamada.
+      const checkinResult = await queueService.checkinByDocument(trimmed);
       setAcceptedAt(new Date());
+      setMatchedPerson({ fullName: checkinResult?.fullName });
+      setAssignedPos(checkinResult?.queuePosition || 1);
       setStep("confirmado");
-    } else {
-      setStep("no_encontrado");
+    } catch (err) {
+      console.error("Error al procesar check-in en la API:", err);
+      // Si la API retorna 404 o no encuentra a la persona
+      if (err.status === 404 || err.message?.toLowerCase().includes("no encontrad")) {
+        setStep("no_encontrado");
+      } else {
+        setErrorMsg(err.message || "Error al conectar con el servidor");
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
   function handleRetry() {
     setDocumento("");
+    setErrorMsg("");
     setStep("documento");
   }
 
-  function handleCreateUser() {
-    // En producción esto navega a vista_registro_kiosko.jsx pasando el
-    // documento ya digitado, para no volver a pedirlo.
-    setStep("redirigiendo");
-  }
-
   return (
-    <div className="min-h-screen w-full bg-neutral-950 flex items-center justify-center px-6">
+    <div className="min-h-screen w-full bg-neutral-950 flex flex-col items-center justify-center px-6 py-10 font-body relative">
+      <button
+        onClick={() => navigate("/lobby/panel")}
+        className="absolute top-6 left-6 flex items-center gap-2 text-neutral-400 hover:text-white text-xs bg-neutral-900 border border-neutral-800 px-3 py-2 rounded-xl transition-colors"
+      >
+        <ArrowLeft size={14} /> Volver al Panel
+      </button>
+
       <div className="w-full max-w-lg">
         {step === "documento" && (
           <div className="text-center">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/15 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-6">
               <CreditCard className="text-emerald-400" size={28} />
             </div>
-            <h1 className="text-3xl font-bold text-white mb-2">Ingresa tu número de documento</h1>
-            <p className="text-neutral-400 mb-8">Para hacer check-in en la fila de hoy</p>
+            <h1 className="text-2xl font-bold text-white mb-2">Ingresa tu documento</h1>
+            <p className="text-neutral-400 text-sm mb-6">Para hacer check-in en la Terminal PSR de hoy</p>
+
+            {errorMsg && (
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm rounded-xl text-center">
+                {errorMsg}
+              </div>
+            )}
 
             <input
               autoFocus
@@ -56,86 +79,74 @@ export default function LobbyCheckinPage() {
               onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
               placeholder="Ej. 1001234567"
               inputMode="numeric"
-              className="w-full bg-neutral-900 border-2 border-neutral-800 rounded-2xl px-5 py-5 text-white text-2xl text-center tracking-widest placeholder-neutral-700 outline-none focus:border-emerald-500 transition-colors"
+              className="w-full bg-neutral-900 border-2 border-neutral-800 rounded-2xl px-5 py-4 text-white text-2xl text-center tracking-widest placeholder-neutral-700 outline-none focus:border-emerald-500 transition-colors"
             />
 
-            <button
-              onClick={handleSubmit}
-              disabled={!documento.trim()}
-              className="w-full mt-4 bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 transition-colors text-neutral-950 font-bold text-lg py-4 rounded-2xl"
-            >
-              Aceptar
-            </button>
+            <div className="mt-6 flex flex-col gap-3">
+              <button
+                onClick={handleSubmit}
+                disabled={!documento.trim() || loading}
+                className="w-full bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 text-neutral-950 font-bold text-lg py-3.5 rounded-2xl transition-colors shadow-lg shadow-emerald-500/20"
+              >
+                {loading ? "Verificando..." : "Confirmar Asistencia"}
+              </button>
+            </div>
           </div>
         )}
 
         {step === "no_encontrado" && (
-          <div className="text-center">
-            <div className="w-16 h-16 rounded-2xl bg-red-500/15 border-2 border-red-500 flex items-center justify-center mx-auto mb-6">
-              <AlertCircle className="text-red-400" size={28} />
+          <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-8 text-center">
+            <div className="w-16 h-16 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto mb-4 text-amber-400">
+              <AlertCircle size={32} />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">No tienes usuario registrado</h1>
-            <p className="text-neutral-400 mb-8">
-              Puede que hayas digitado mal tu documento, o que sea tu primera vez aquí.
+            <h2 className="text-xl font-bold text-white mb-2">Documento no registrado</h2>
+            <p className="text-neutral-400 text-sm mb-6">
+              El documento <span className="text-white font-mono font-bold">{documento}</span> no aparece registrado en el sistema. Toda persona debe tener una cuenta para hacer check-in.
             </p>
 
             <div className="flex flex-col gap-3">
               <button
-                onClick={handleRetry}
-                className="flex items-center justify-center gap-2 border-2 border-neutral-700 text-neutral-200 hover:bg-neutral-800 font-semibold text-base py-4 rounded-2xl transition-colors"
+                onClick={() => navigate(`/lobby/register?documento=${encodeURIComponent(documento)}`)}
+                className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold py-3.5 rounded-xl transition-colors"
               >
-                <RotateCcw size={18} />
-                Volver a intentar
+                <UserPlus size={18} /> Crear cuenta en Terminal PSR
               </button>
+
               <button
-                onClick={handleCreateUser}
-                className="flex items-center justify-center gap-2 bg-white text-neutral-950 hover:bg-neutral-200 font-bold text-base py-4 rounded-2xl transition-colors"
+                onClick={handleRetry}
+                className="flex items-center justify-center gap-2 text-neutral-400 hover:text-white text-sm py-2 transition-colors"
               >
-                <UserPlus size={18} />
-                Crear usuario
+                <RotateCcw size={16} /> Intentar otro documento
               </button>
             </div>
           </div>
         )}
 
         {step === "confirmado" && (
-          <div className="text-center">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-500/15 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-6">
-              <CheckCircle2 className="text-emerald-400" size={28} />
+          <div className="bg-neutral-900 border border-emerald-500/40 rounded-3xl p-8 text-center shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500 flex items-center justify-center mx-auto mb-4 text-emerald-400">
+              <CheckCircle2 size={36} />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">Ya estás en la fila</h1>
-            <p className="text-neutral-400 mb-6">Mira la pantalla de sala de espera para ver tu turno</p>
-
-            <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 flex items-center justify-center gap-4">
-              <Users className="text-neutral-500" size={20} />
-              <p className="text-neutral-300 text-sm">
-                Turno número <span className="text-white font-bold text-lg">{queuePosition}</span>
-              </p>
-            </div>
-            {acceptedAt && (
-              <p className="text-neutral-600 text-xs mt-4">
-                Hora de ingreso a la fila: {formatTime(acceptedAt)}
-              </p>
-            )}
-          </div>
-        )}
-
-        {step === "redirigiendo" && (
-          <div className="text-center">
-            <div className="w-16 h-16 rounded-2xl bg-neutral-800 border-2 border-neutral-700 flex items-center justify-center mx-auto mb-6">
-              <UserPlus className="text-neutral-400" size={28} />
-            </div>
-            <h1 className="text-xl font-bold text-white mb-2">Redirigiendo a registro...</h1>
-            <p className="text-neutral-500 text-sm">
-              (En producción esto abre{" "}
-              <code className="text-neutral-400">vista_registro_kiosko.jsx</code> con tu documento{" "}
-              <span className="text-neutral-300 font-semibold">{documento}</span> ya precargado)
+            <h2 className="text-3xl font-bold text-white mb-1 font-display">¡Check-in Registrado!</h2>
+            <p className="text-emerald-400 font-semibold text-lg mb-6">
+              {matchedPerson?.fullName || `Documento ${documento}`}
             </p>
+
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-6 mb-6">
+              <span className="text-neutral-500 text-xs font-semibold uppercase tracking-wider block mb-1">
+                Tu posición en la sala de espera
+              </span>
+              <span className="text-5xl font-extrabold text-white font-display">#{assignedPos}</span>
+              <p className="text-neutral-400 text-xs mt-3">
+                Hora de llegada registrada: {acceptedAt ? formatTime(acceptedAt) : ""}
+              </p>
+            </div>
+
             <button
               onClick={handleRetry}
-              className="mt-6 text-sm text-neutral-500 hover:text-white underline underline-offset-2"
+              className="w-full bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold text-lg py-3.5 rounded-xl transition-colors"
             >
-              Volver al inicio
+              Finalizar / Nuevo Check-in
             </button>
           </div>
         )}

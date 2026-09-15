@@ -1,36 +1,64 @@
 import { useState } from "react";
-import { CheckCircle2, CreditCard, KeyRound } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CheckCircle2, CreditCard, KeyRound, Mail, Cake, LogIn, ArrowLeft } from "lucide-react";
 import Field from "../../components/forms/Field";
+import BirthDateField from "../../components/forms/BirthDateField";
+import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
+import { peopleService } from "../../services/peopleService";
 
 const inputClass =
   "w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white text-base placeholder-neutral-600 outline-none focus:border-emerald-500";
 
-// Nota: tipo de sangre y teléfono de emergencia se quitaron de este
-// formulario — esos datos ahora viven en un paso/pantalla de contacto de
-// emergencia aparte, todavía pendiente de decidir el formato final.
-//
-// Nota: documento es nuevo aquí — antes este formulario no lo pedía.
-// Ahora hace falta porque la contraseña por defecto de la cuenta que se
-// crea en este mismo paso ES el documento.
 export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
+  const navigate = useNavigate();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [documentType, setDocumentType] = useState("CC");
   const [documento, setDocumento] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [passwordMode, setPasswordMode] = useState("documento"); // documento | propia
   const [password, setPassword] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  // Panel de confirmación antes del envío final (mejoras-frontend.md §1) — un typo en el
+  // documento o el teléfono acá nadie más lo revisa antes de guardarlo, a diferencia del alta
+  // que hace recepción.
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const canSubmit =
     firstName.trim() &&
     lastName.trim() &&
     documento.trim() &&
     phone.trim() &&
-    (passwordMode === "documento" || password.trim());
+    birthDate &&
+    (passwordMode === "documento" || password.trim().length >= 8);
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!canSubmit) return;
-    setSubmitted(true);
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await peopleService.autoRegister({
+        documentType,
+        documentNumber: documento.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+        birthDate,
+        password: passwordMode === "documento" ? null : password,
+      });
+      setShowConfirm(false);
+      setSubmitted(true);
+    } catch (err) {
+      setShowConfirm(false);
+      setErrorMessage(err.data?.message || err.message || "No fue posible registrar la cuenta.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (submitted) {
@@ -50,9 +78,16 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
               <p className="text-white font-semibold">
                 {firstName} {lastName}
               </p>
-              <p className="text-neutral-500 text-sm mt-0.5">Documento: {documento}</p>
+              <p className="text-neutral-500 text-sm mt-0.5">Documento: {documentType} {documento}</p>
               <p className="text-neutral-500 text-sm">{phone}</p>
             </div>
+
+            <button
+              onClick={() => navigate("/login")}
+              className="w-full mt-6 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold py-3 rounded-xl transition-colors"
+            >
+              <LogIn size={18} /> Volver a Iniciar Sesión
+            </button>
           </div>
         </div>
       </div>
@@ -60,8 +95,15 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
   }
 
   return (
-    <div className="min-h-screen w-full bg-neutral-950 flex items-start justify-center px-4 py-10">
-      <div className="w-full max-w-sm">
+    <div className="min-h-screen w-full bg-neutral-950 flex items-start justify-center px-4 py-10 relative">
+      <button
+        onClick={() => navigate("/login")}
+        className="absolute top-6 left-4 flex items-center gap-2 text-neutral-400 hover:text-white text-xs bg-neutral-900 border border-neutral-800 px-3 py-2 rounded-xl transition-colors"
+      >
+        <ArrowLeft size={14} /> Volver a Iniciar Sesión
+      </button>
+
+      <div className="w-full max-w-sm mt-12">
         <div className="text-center mb-6">
           <p className="text-neutral-500 text-sm font-semibold tracking-wide uppercase">{activityName}</p>
           <h1 className="text-2xl font-bold text-white mt-1">Crea tu perfil</h1>
@@ -69,6 +111,12 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
             Completa tus datos para poder ingresar a las clases
           </p>
         </div>
+
+        {errorMessage && (
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl text-center">
+            {errorMessage}
+          </div>
+        )}
 
         <div className="bg-neutral-900 rounded-3xl p-6 border border-neutral-800 flex flex-col gap-4">
           <Field label="Nombre">
@@ -89,15 +137,32 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
             />
           </Field>
 
-          <Field label="Documento" icon={<CreditCard size={14} />}>
-            <input
-              inputMode="numeric"
-              value={documento}
-              onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ""))}
-              placeholder="1001234567"
-              className={inputClass}
-            />
-          </Field>
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Tipo Doc.">
+              <select
+                value={documentType}
+                onChange={(e) => setDocumentType(e.target.value)}
+                className={inputClass}
+              >
+                <option value="CC">CC</option>
+                <option value="TI">TI</option>
+                <option value="CE">CE</option>
+                <option value="PA">PA</option>
+              </select>
+            </Field>
+
+            <div className="col-span-2">
+              <Field label="Número de Documento" icon={<CreditCard size={14} />}>
+                <input
+                  inputMode="numeric"
+                  value={documento}
+                  onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ""))}
+                  placeholder="1001234567"
+                  className={inputClass}
+                />
+              </Field>
+            </div>
+          </div>
 
           <Field label="Teléfono">
             <input
@@ -110,7 +175,20 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
             />
           </Field>
 
-          {/* Elección de contraseña — por defecto es el documento. */}
+          <Field label="Correo electrónico (opcional)" icon={<Mail size={14} />}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="correo@ejemplo.com"
+              className={inputClass}
+            />
+          </Field>
+
+          <Field label="Fecha de nacimiento" icon={<Cake size={14} />}>
+            <BirthDateField value={birthDate} onChange={setBirthDate} selectClassName={inputClass} />
+          </Field>
+
           <div>
             <label className="text-neutral-300 text-sm font-semibold flex items-center gap-1.5 mb-1.5">
               <KeyRound size={14} />
@@ -118,6 +196,7 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
             </label>
             <div className="flex bg-neutral-800 rounded-lg p-1 text-xs font-semibold mb-2">
               <button
+                type="button"
                 onClick={() => setPasswordMode("documento")}
                 className={`flex-1 px-3 py-2 rounded-md transition-colors ${
                   passwordMode === "documento" ? "bg-emerald-500 text-neutral-950" : "text-neutral-400"
@@ -126,6 +205,7 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
                 Usar mi documento
               </button>
               <button
+                type="button"
                 onClick={() => setPasswordMode("propia")}
                 className={`flex-1 px-3 py-2 rounded-md transition-colors ${
                   passwordMode === "propia" ? "bg-emerald-500 text-neutral-950" : "text-neutral-400"
@@ -139,25 +219,39 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
                 Será tu documento{documento ? `: ${documento}` : ""}. La puedes cambiar después desde tu perfil.
               </p>
             ) : (
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Escribe tu contraseña"
-                className={inputClass}
-              />
+              <>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Escribe tu contraseña (mínimo 8 caracteres)"
+                  className={inputClass}
+                />
+                {password && password.length < 8 && (
+                  <p className="text-amber-400 text-xs mt-1">La contraseña debe tener al menos 8 caracteres.</p>
+                )}
+              </>
             )}
           </div>
         </div>
 
         <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
+          onClick={() => setShowConfirm(true)}
+          disabled={!canSubmit || loading}
           className="w-full mt-6 bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 active:scale-[0.98] transition-all text-neutral-950 font-bold text-lg py-5 rounded-2xl shadow-lg shadow-emerald-500/20"
         >
-          Enviar solicitud
+          {loading ? "Registrando..." : "Enviar solicitud"}
         </button>
       </div>
+
+      {showConfirm && (
+        <RegistrationConfirmModal
+          data={{ firstName, lastName, documentType, documento, phone, email, birthDate }}
+          submitting={loading}
+          onConfirm={handleSubmit}
+          onClose={() => setShowConfirm(false)}
+        />
+      )}
     </div>
   );
 }

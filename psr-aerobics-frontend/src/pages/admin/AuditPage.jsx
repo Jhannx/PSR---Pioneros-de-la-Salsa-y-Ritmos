@@ -1,51 +1,96 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowRight, History } from "lucide-react";
 import { formatDateTimeShort as formatDateTime } from "../../utils/date";
+import { reportsService } from "../../services/reportsService";
 
 const TABLE_LABELS = {
-  ASISTENCIA: "Asistencia",
-  MOVIMIENTO_CUENTA: "Movimiento de cuenta",
-  TARIFA: "Tarifa",
-  CONFIGURACION_COLA: "Configuración de cola",
-  PERSONA: "Persona",
-  SESION: "Sesión",
+  ATTENDANCE: "Asistencia",
+  ACCOUNT_MOVEMENT: "Movimiento de cuenta",
+  PRICING: "Tarifa",
+  QUEUE_CONFIG: "Configuración de cola",
+  PERSON: "Persona",
+  SESSION: "Sesión",
+};
+
+// `field` es el nombre de columna tal cual, sin traducir (confirmado en NOTAS-PARA-FRONTEND.md
+// §3: queda de nuestro lado). Diccionario completo de lo único que el backend puede mandar hoy —
+// no hay más casos que estos 9.
+const FIELD_LABELS = {
+  activo: "Persona reactivada",
+  persona: "Persona eliminada",
+  cancelada: "Sesión cancelada",
+  hora_fin: "Sesión cerrada automáticamente",
+  monto: "Tarifa modificada",
+  monto_recibido: "Pago corregido",
+  monto_abonado: "Pago corregido",
+  personas_por_turno: "Configuración de cola",
+  minutos_margen_ingreso: "Configuración de cola",
+  minutos_visibilidad_pagos: "Configuración de cola",
+};
+
+// El cierre automático de sesiones queda a nombre de esta cuenta técnica, y lo que tocaba a una
+// persona eliminada se reasigna a un usuario centinela — ninguna es una persona del equipo
+// (NOTAS-PARA-FRONTEND.md §3). Solo se traduce SISTEMA porque es el único nombre exacto que dieron;
+// si hay un identificador fijo para el centinela, se agrega acá cuando se confirme.
+const SYSTEM_PERFORMER_LABELS = {
+  SISTEMA: "Sistema (automático)",
 };
 
 const FILTERS = [
   { key: "all", label: "Todo" },
-  { key: "TARIFA", label: "Tarifa" },
-  { key: "MOVIMIENTO_CUENTA", label: "Pagos" },
-  { key: "ASISTENCIA", label: "Asistencia" },
-  { key: "PERSONA", label: "Personas" },
-  { key: "SESION", label: "Sesiones" },
-  { key: "CONFIGURACION_COLA", label: "Cola" },
-];
-
-const initialHistory = [
-  { id: 300, affectedTable: "TARIFA", field: "monto", oldValue: "4000.00", newValue: "4500.00", performedBy: "Camilo Pérez", dateTime: "2026-08-27T08:00:00" },
-  { id: 299, affectedTable: "SESION", field: "cancelada", oldValue: "false", newValue: "true", performedBy: "Laura Gómez", dateTime: "2026-08-25T05:55:00" },
-  { id: 298, affectedTable: "PERSONA", field: "persona", oldValue: "activa", newValue: "eliminada_definitivamente", performedBy: "Camilo Pérez", dateTime: "2026-08-24T14:10:00" },
-  { id: 297, affectedTable: "MOVIMIENTO_CUENTA", field: "monto_abonado", oldValue: "4000.00", newValue: "3000.00", performedBy: "Camilo Pérez", dateTime: "2026-08-22T09:41:00" },
-  { id: 296, affectedTable: "PERSONA", field: "activo", oldValue: "false", newValue: "true", performedBy: "Laura Gómez", dateTime: "2026-08-20T11:03:00" },
-  { id: 295, affectedTable: "CONFIGURACION_COLA", field: "personas_por_turno", oldValue: "1", newValue: "2", performedBy: "Camilo Pérez", dateTime: "2026-08-18T16:00:00" },
+  { key: "PRICING", label: "Tarifa" },
+  { key: "ACCOUNT_MOVEMENT", label: "Pagos" },
+  { key: "ATTENDANCE", label: "Asistencia" },
+  { key: "PERSON", label: "Personas" },
+  { key: "SESSION", label: "Sesiones" },
+  { key: "QUEUE_CONFIG", label: "Cola" },
 ];
 
 export default function AuditPage() {
   const [activeFilter, setActiveFilter] = useState("all");
+  const [history, setHistory] = useState([]);
+  const [error, setError] = useState("");
+  const [from, setFrom] = useState(() => `${new Date().toISOString().slice(0, 10)}T00:00`);
+  const [to, setTo] = useState(() => `${new Date().toISOString().slice(0, 10)}T23:59`);
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
+  useEffect(() => {
+    async function loadAudit() {
+      try {
+        setError("");
+        const response = await reportsService.getAuditHistory({
+          desde: `${from}:00-05:00`, hasta: `${to}:00-05:00`, page, size: 25,
+        });
+        if (response && Array.isArray(response.content)) {
+          setHistory(response.content);
+          setTotalPages(response.totalPages || 0);
+        } else if (Array.isArray(response)) {
+          setHistory(response);
+        }
+      } catch (err) {
+        setHistory([]);
+        setError(err.data?.message || err.message || "No fue posible cargar el historial.");
+      }
+    }
+    loadAudit();
+  }, [from, to, page]);
 
   const filtered =
-    activeFilter === "all" ? initialHistory : initialHistory.filter((row) => row.affectedTable === activeFilter);
+    activeFilter === "all" ? history : history.filter((row) => row.affectedTable === activeFilter);
 
   return (
-    <div className="min-h-screen w-full bg-neutral-950 px-6 py-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center gap-3 mb-1">
-          <History className="text-neutral-500" size={22} />
-          <h1 className="text-2xl font-bold text-white">Auditoría</h1>
+    <div className="min-h-screen w-full bg-neutral-950 px-4 md:px-6 py-4 text-white font-body">
+      <div className="max-w-6xl mx-auto space-y-3">
+        <div className="border-b border-neutral-800 pb-3">
+          <div className="flex items-center gap-2">
+            <History className="text-neutral-400" size={18} />
+            <h1 className="text-xl font-bold text-white tracking-tight">Auditoría de Actividad</h1>
+          </div>
+          <p className="text-neutral-400 text-xs mt-0.5">
+            Historial de cambios sobre información sensible del sistema (Solo lectura)
+          </p>
         </div>
-        <p className="text-neutral-500 text-sm mb-6">
-          Historial de cambios sobre información sensible del sistema. Solo lectura.
-        </p>
 
         <div className="flex flex-wrap gap-2 mb-5">
           {FILTERS.map((f) => {
@@ -65,22 +110,29 @@ export default function AuditPage() {
             );
           })}
         </div>
+        <div className="flex flex-wrap gap-3 items-end mb-4">
+          <label className="text-xs text-neutral-400">Desde<input type="datetime-local" value={from} onChange={(e) => { setPage(0); setFrom(e.target.value); }} className="block mt-1 bg-neutral-900 border border-neutral-700 rounded-lg p-2 text-white" /></label>
+          <label className="text-xs text-neutral-400">Hasta<input type="datetime-local" value={to} onChange={(e) => { setPage(0); setTo(e.target.value); }} className="block mt-1 bg-neutral-900 border border-neutral-700 rounded-lg p-2 text-white" /></label>
+        </div>
+        {error && <div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm">{error}</div>}
 
         <div className="flex flex-col gap-2">
           {filtered.map((row) => (
             <div key={row.id} className="flex items-center gap-4 px-4 py-3.5 bg-neutral-900 border border-neutral-800 rounded-2xl">
               <span className="w-40 shrink-0">
                 <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-neutral-800 text-neutral-400">
-                  {TABLE_LABELS[row.affectedTable]}
+                  {TABLE_LABELS[row.affectedTable] || row.affectedTable}
                 </span>
               </span>
-              <span className="w-40 shrink-0 text-neutral-400 text-sm">{row.field}</span>
+              <span className="w-40 shrink-0 text-neutral-400 text-sm">{FIELD_LABELS[row.field] || row.field}</span>
               <span className="flex-1 flex items-center gap-2 text-sm min-w-0">
                 <span className="text-neutral-600 truncate">{row.oldValue ?? "—"}</span>
                 <ArrowRight size={13} className="text-neutral-700 shrink-0" />
                 <span className="text-white font-semibold truncate">{row.newValue ?? "—"}</span>
               </span>
-              <span className="w-40 shrink-0 text-right text-neutral-400 text-sm">{row.performedBy}</span>
+              <span className="w-40 shrink-0 text-right text-neutral-400 text-sm">
+                {SYSTEM_PERFORMER_LABELS[row.performedBy] || row.performedBy}
+              </span>
               <span className="w-32 shrink-0 text-right text-neutral-600 text-xs">{formatDateTime(row.dateTime)}</span>
             </div>
           ))}
@@ -88,6 +140,7 @@ export default function AuditPage() {
             <div className="text-center py-10 text-neutral-600 text-sm">No hay cambios registrados en esta categoría.</div>
           )}
         </div>
+        {totalPages > 1 && <div className="flex justify-center gap-3 text-sm"><button disabled={page === 0} onClick={() => setPage((current) => current - 1)} className="px-3 py-2 bg-neutral-800 rounded-lg disabled:opacity-40">Anterior</button><span className="py-2 text-neutral-400">Página {page + 1} de {totalPages}</span><button disabled={page + 1 >= totalPages} onClick={() => setPage((current) => current + 1)} className="px-3 py-2 bg-neutral-800 rounded-lg disabled:opacity-40">Siguiente</button></div>}
       </div>
     </div>
   );

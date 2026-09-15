@@ -1,4 +1,4 @@
-// Repetido idéntico en vista_registro_movil.jsx, vista_registro_kiosko.jsx
+// Repetido idéntico en vista_registro_movil.jsx, vista_registro_terminal.jsx
 // y vista_contacto_emergencia_movil.jsx — envoltorio de label + ícono
 // para un campo de formulario.
 export default function Field({ label, hint, icon, children }) {

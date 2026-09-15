@@ -1,174 +1,280 @@
-import { useState } from "react";
-import { UserPlus, Search, QrCode } from "lucide-react";
-import { daysAgo, randomPhone, randomDocumento } from "../../features/reception/utils";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { UserPlus, Search } from "lucide-react";
 import PersonRow from "../../features/reception/components/PersonRow";
 import PersonFormModal from "../../features/reception/components/PersonFormModal";
 import HardDeleteModal from "../../features/reception/components/HardDeleteModal";
+import { useAuth } from "../../context/AuthContext";
+import { peopleService } from "../../services/peopleService";
 
-// Initial mock data — sin aprobación: todo el mundo que aparece aquí ya está activo,
-// sin importar si se registró por QR (autoregistro) o lo agregó el admin (manual).
-//
-// Nota: tipo de sangre y teléfono de emergencia se quitaron — esos datos
-// ahora viven en un paso/pantalla aparte, pendiente de decidir el formato
-// final. documento es nuevo: toda persona registrada crea una cuenta con
-// contraseña por defecto = documento (RF-01), así que ahora es obligatorio.
-const initialPeople = [
-  { id: 1, firstName: "Laura", lastName: "Gómez Restrepo", documento: "1001234567", phone: "3001234567", source: "manual", registeredAt: daysAgo(40) },
-  { id: 2, firstName: "Camilo", lastName: "Pérez Londoño", documento: "1012345678", phone: "3012345678", source: "qr", registeredAt: daysAgo(25) },
-  { id: 3, firstName: "Valentina", lastName: "Suárez Duque", documento: "1023456789", phone: "3023456789", source: "manual", registeredAt: daysAgo(12) },
-  { id: 4, firstName: "Santiago", lastName: "Herrera Cano", documento: "1034567890", phone: "3034567890", source: "qr", registeredAt: daysAgo(5) },
-  { id: 5, firstName: "Mariana", lastName: "Duque Salazar", documento: "1056789012", phone: "3056789012", source: "qr", registeredAt: daysAgo(1) },
-];
-
-// Pool usado solo para simular autoregistros entrando por QR — caen directo a la
-// lista, sin ningún paso intermedio.
-const REQUEST_POOL = [
-  { firstName: "Isabella", lastName: "Correa Muñoz" },
-  { firstName: "Tomás", lastName: "Vargas Peña" },
-  { firstName: "Manuela", lastName: "Zapata Ríos" },
-  { firstName: "Sebastián", lastName: "Londoño Cárdenas" },
-];
-
+// Un solo debounce para todo — ver el porqué del arreglo completo junto a loadPeople más abajo
+// (errores-frontend.md #3).
+const SEARCH_DEBOUNCE_MS = 350;
 
 export default function PeopleListPage() {
-  const [people, setPeople] = useState(initialPeople);
-  const [nextId, setNextId] = useState(initialPeople.length + 1);
-  const [requestPoolIndex, setRequestPoolIndex] = useState(0);
+  const { user } = useAuth();
+  const isAdmin = user.roles.includes("ADMIN");
+  const isReadOnly = user.roles.includes("TEACHER") && !isAdmin && !user.roles.includes("RECEPTIONIST");
+  const [people, setPeople] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const [pageInfo, setPageInfo] = useState({ totalPages: 0, totalElements: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  // Conteo real, independiente del filtro de búsqueda (errores-nuevo-front.md #2): se pide aparte,
+  // sin `buscar`, y se refresca solo tras altas/bajas — no en cada tecleo del buscador.
+  const [activeTotal, setActiveTotal] = useState(null);
+  const [registeredTotal, setRegisteredTotal] = useState(null);
 
   const [formModal, setFormModal] = useState(null); // null | { mode: 'add' } | { mode: 'edit', person }
+  const [modalError, setModalError] = useState("");
+  const [savingPerson, setSavingPerson] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState(null);
-  const [hardDeleteTarget, setHardDeleteTarget] = useState(null); // null | person
+  const [hardDeleteTarget, setHardDeleteTarget] = useState(null);
 
-  const visiblePeople = people
-    .filter((p) => {
-      const q = searchQuery.trim().toLowerCase();
-      if (!q) return true;
-      return `${p.firstName} ${p.lastName} ${p.documento}`.toLowerCase().includes(q);
-    })
-    .sort((a, b) => a.lastName.localeCompare(b.lastName));
+  // Antes de este arreglo había una carrera entre dos peticiones: con el primer carácter
+  // escrito, `searchQuery.trim().length === 1` disparaba el fetch con retardo 0 pero
+  // `length >= 2` seguía siendo falso, así que salía una consulta SIN filtro (la lista
+  // completa). Con el segundo carácter salía la consulta filtrada, a 300ms. La consulta sin
+  // filtro es la más lenta (trae todo) y solía responder después, pisando el resultado
+  // filtrado ya en pantalla — eso era el "se recarga solo y vuelve a mostrar todas las
+  // personas" (errores-frontend.md #3). El arreglo tiene dos mitades: un solo debounce para
+  // todos los casos (abajo) y, acá, un `requestId` que descarta cualquier respuesta que no sea
+  // la de la petición más reciente en curso, sin importar el orden en que lleguen.
+  const searchAbortRef = useRef(null);
+  const requestIdRef = useRef(0);
 
-  function savePerson(data) {
-    if (formModal?.mode === "edit") {
-      setPeople((prev) => prev.map((p) => (p.id === formModal.person.id ? { ...p, ...data } : p)));
-    } else {
-      setPeople((prev) => [
-        ...prev,
-        { id: nextId, ...data, source: "manual", registeredAt: new Date().toISOString() },
-      ]);
-      setNextId((n) => n + 1);
+  const loadPeople = useCallback(async () => {
+    searchAbortRef.current?.abort();
+    const controller = new AbortController();
+    searchAbortRef.current = controller;
+    const requestId = ++requestIdRef.current;
+
+    setLoading(true);
+    setError("");
+    try {
+      const params = { page, size: 20 };
+      if (searchQuery.trim().length >= 2) params.buscar = searchQuery.trim();
+      const response = await peopleService.getAll(params, { signal: controller.signal });
+      if (requestId !== requestIdRef.current) return; // ya hay una petición más nueva en curso
+      setPeople(response?.content || (Array.isArray(response) ? response : []));
+      setPageInfo({ totalPages: response?.totalPages || 0, totalElements: response?.totalElements || 0 });
+    } catch (err) {
+      if (err.name === "AbortError") return; // cancelada a propósito, no es un error real
+      if (requestId !== requestIdRef.current) return;
+      setPeople([]);
+      setError(err.data?.message || err.message || "No fue posible consultar las personas.");
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-    setFormModal(null);
+  }, [page, searchQuery]);
+
+  useEffect(() => {
+    const timer = setTimeout(loadPeople, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [loadPeople]);
+
+  // `GET /api/personas` no acepta ningún filtro de `activo` (openapi.md: solo admite `buscar` y
+  // `pageable`) — así que la única forma de un conteo de "activos" real es traer todas las
+  // páginas y contarlas acá, no hay atajo del backend todavía. Antes se pedía `size=1` y se
+  // tomaba `totalElements` tal cual llamándolo "activos": ese número es el total de personas
+  // (activas + inactivas juntas, sin distinguir), así que desactivar a alguien nunca lo movía —
+  // el conteo "seguía contando como activo" después de desactivar (errores-12sep-front.md #1 y
+  // #4). Tope de 25 páginas (5000 personas) como salvaguarda razonable para el tamaño de esta
+  // academia; si el directorio crece más que eso, esto sí necesita un endpoint de conteo real.
+  const loadActiveTotal = useCallback(async () => {
+    const PAGE_SIZE = 200;
+    const MAX_PAGES = 25;
+    try {
+      let pageIndex = 0;
+      let total = 0;
+      let active = 0;
+      let totalPages = 1;
+      do {
+        const response = await peopleService.getAll({ page: pageIndex, size: PAGE_SIZE });
+        const content = Array.isArray(response?.content) ? response.content : [];
+        active += content.filter((p) => p.active !== false).length;
+        total = response?.totalElements ?? total + content.length;
+        totalPages = response?.totalPages ?? 1;
+        pageIndex += 1;
+      } while (pageIndex < totalPages && pageIndex < MAX_PAGES);
+      setActiveTotal(active);
+      setRegisteredTotal(total);
+    } catch {
+      // No es crítico: si falla, el encabezado simplemente no muestra el conteo.
+    }
+  }, []);
+
+  useEffect(() => {
+    Promise.resolve().then(loadActiveTotal);
+  }, [loadActiveTotal]);
+
+  function handleSearchChange(value) {
+    setPage(0);
+    setSearchQuery(value);
   }
 
-  // Desactivar = soft-delete reversible ("dejó la academia"). Esto es lo
-  // que antes se llamaba simplemente "Eliminar" — se renombra para no
-  // confundirlo con la eliminación definitiva de abajo.
-  function confirmDeactivateYes() {
+  async function handleSavePerson(data) {
+    setSavingPerson(true);
+    setModalError("");
+    try {
+      if (formModal?.mode === "edit") {
+        await peopleService.update(formModal.person.id, data);
+      } else {
+        await peopleService.create(data);
+      }
+      setFormModal(null);
+      await loadPeople();
+      await loadActiveTotal();
+    } catch (err) {
+      // Se muestra DENTRO del modal (`modalError`), no en `error` de la página: ese banner queda
+      // detrás del modal (z-50, fondo oscurecido) y era invisible — un 409 de documento/teléfono
+      // duplicado no se veía nunca, tanto en alta como en edición (errores-12sep-front.md #9).
+      setModalError(err.data?.message || err.message || "No fue posible guardar la persona.");
+    } finally {
+      setSavingPerson(false);
+    }
+  }
+
+  // Actualiza solo la fila afectada en el estado local en vez de volver a pedir la página
+  // completa: esa reconsulta era lo que hacía "sentir" lenta la acción (errores-frontend.md #1),
+  // además de disparar de nuevo la consulta N+1 que el backend ya tiene identificada como lenta.
+  async function handleConfirmDeactivate() {
     if (!confirmDeactivateId) return;
-    setPeople((prev) => prev.filter((p) => p.id !== confirmDeactivateId));
+    try {
+      await peopleService.deactivate(confirmDeactivateId);
+      setPeople((prev) => prev.map((p) => (p.id === confirmDeactivateId ? { ...p, active: false } : p)));
+      await loadActiveTotal();
+    } catch (err) {
+      setError(err.data?.message || err.message || "No fue posible desactivar la persona.");
+    }
     setConfirmDeactivateId(null);
   }
 
-  // Eliminación definitiva (RF-08) — irreversible. El nombre, documento y
-  // teléfono se van de verdad; el historial de asistencias/pagos se
-  // conserva, ya sin ningún dato que identifique a la persona.
-  function confirmHardDelete() {
-    if (!hardDeleteTarget) return;
-    setPeople((prev) => prev.filter((p) => p.id !== hardDeleteTarget.id));
-    setHardDeleteTarget(null);
+  async function handleReactivate(personId) {
+    try {
+      await peopleService.reactivate(personId);
+      setPeople((prev) => prev.map((p) => (p.id === personId ? { ...p, active: true } : p)));
+      await loadActiveTotal();
+    } catch (err) {
+      setError(err.data?.message || err.message || "No fue posible reactivar la persona.");
+    }
   }
 
-  function simulateQrSelfRegistration() {
-    const template = REQUEST_POOL[requestPoolIndex % REQUEST_POOL.length];
-    setRequestPoolIndex((i) => i + 1);
-    setPeople((prev) => [
-      ...prev,
-      {
-        id: nextId,
-        firstName: template.firstName,
-        lastName: template.lastName,
-        documento: randomDocumento(),
-        phone: randomPhone(),
-        source: "qr",
-        registeredAt: new Date().toISOString(),
-      },
-    ]);
-    setNextId((n) => n + 1);
+  async function handleConfirmHardDelete() {
+    if (!hardDeleteTarget) return;
+    try {
+      await peopleService.remove(hardDeleteTarget.id);
+      setHardDeleteTarget(null);
+      await loadPeople();
+      await loadActiveTotal();
+    } catch (err) {
+      setError(err.data?.message || err.message || "No fue posible eliminar la persona.");
+    }
   }
 
   return (
-    <div className="min-h-screen w-full bg-neutral-950 px-6 py-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
+    <div className="min-h-screen bg-neutral-950 text-white px-4 md:px-6 py-4 font-body">
+      <div className="max-w-6xl mx-auto space-y-3">
+        {/* Encabezado compacto */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-3">
           <div>
-            <h1 className="text-2xl font-bold text-white">Personas registradas</h1>
-            <p className="text-neutral-500 text-sm mt-1">{people.length} en total</p>
+            <h1 className="text-xl font-bold text-white tracking-tight">Personas</h1>
+            <p className="text-neutral-400 text-xs mt-0.5">
+              Directorio general de alumnos y miembros
+              {/* Antes decía "(N usuarios activos)" usando el total de registrados (activos +
+                  inactivos, sin distinguir) — nombrado "activos" pero sin serlo, y por eso no
+                  bajaba al desactivar a alguien (errores-12sep-front.md #1 y #4). Ahora se
+                  muestran los dos números reales por separado. */}
+              {registeredTotal !== null && ` · ${registeredTotal} registrados`}
+              {activeTotal !== null && ` · ${activeTotal} activos`}
+              {isReadOnly && " · Solo lectura"}
+            </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={simulateQrSelfRegistration}
-              className="flex items-center gap-2 border border-neutral-700 text-neutral-300 hover:bg-neutral-800 font-semibold text-sm px-4 py-2.5 rounded-xl transition-colors"
-            >
-              <QrCode size={16} />
-              Simular autoregistro QR
-            </button>
-            <button
-              onClick={() => setFormModal({ mode: "add" })}
-              className="flex items-center gap-2 bg-white text-neutral-950 hover:bg-neutral-200 font-semibold text-sm px-4 py-2.5 rounded-xl transition-colors"
-            >
-              <UserPlus size={16} />
-              Registrar manual
-            </button>
-          </div>
+          {!isReadOnly && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setModalError("");
+                  setFormModal({ mode: "add" });
+                }}
+                className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-colors shadow-md shadow-emerald-500/20"
+              >
+                <UserPlus size={14} /> Agregar Persona
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Search */}
-        <div className="relative mb-4">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600" />
+        {/* Buscador */}
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500" size={18} />
           <input
+            type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar por nombre o documento..."
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Buscar por nombre, apellido o número de documento..."
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-2xl pl-11 pr-4 py-3 text-sm text-white placeholder-neutral-500 outline-none focus:border-emerald-500 transition-colors"
           />
         </div>
 
-        {/* List */}
-        <div className="flex flex-col gap-2">
-          {visiblePeople.map((person) => (
-            <PersonRow
-              key={person.id}
-              person={person}
-              isConfirmingDeactivate={confirmDeactivateId === person.id}
-              onEdit={() => setFormModal({ mode: "edit", person })}
-              onDeactivateClick={() => setConfirmDeactivateId(person.id)}
-              onConfirmDeactivateYes={confirmDeactivateYes}
-              onConfirmDeactivateCancel={() => setConfirmDeactivateId(null)}
-              onHardDeleteClick={() => setHardDeleteTarget(person)}
-            />
-          ))}
-          {visiblePeople.length === 0 && (
-            <div className="text-center py-10 text-neutral-600 text-sm">No hay personas registradas todavía.</div>
+        {/* Lista */}
+        <div className="bg-neutral-900/80 border border-neutral-800 rounded-3xl overflow-hidden shadow-xl">
+          {error ? (
+            <div className="p-8 text-center text-rose-300 text-sm">{error}</div>
+          ) : loading ? (
+            <div className="p-8 text-center text-neutral-500 text-sm">Consultando personas…</div>
+          ) : people.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 text-sm">
+              No se encontraron personas registradas con el filtro ingresado.
+            </div>
+          ) : (
+            <div className="divide-y divide-neutral-800/60">
+              {people.map((person) => (
+                <PersonRow
+                  key={person.id}
+                  person={person}
+                  readOnly={isReadOnly}
+                  canHardDelete={isAdmin}
+                  isDeactivating={confirmDeactivateId === person.id}
+                  onEdit={() => {
+                    setModalError("");
+                    setFormModal({ mode: "edit", person });
+                  }}
+                  onDeactivateRequest={() => setConfirmDeactivateId(person.id)}
+                  onDeactivateConfirm={handleConfirmDeactivate}
+                  onDeactivateCancel={() => setConfirmDeactivateId(null)}
+                  onReactivate={() => handleReactivate(person.id)}
+                  onHardDeleteRequest={() => setHardDeleteTarget(person)}
+                />
+              ))}
+            </div>
           )}
         </div>
+        {pageInfo.totalPages > 1 && (
+          <div className="flex justify-center gap-3 text-sm">
+            <button disabled={page === 0} onClick={() => setPage((current) => current - 1)} className="px-3 py-2 rounded-lg bg-neutral-800 disabled:opacity-40">Anterior</button>
+            <span className="py-2 text-neutral-400">Página {page + 1} de {pageInfo.totalPages}</span>
+            <button disabled={page + 1 >= pageInfo.totalPages} onClick={() => setPage((current) => current + 1)} className="px-3 py-2 rounded-lg bg-neutral-800 disabled:opacity-40">Siguiente</button>
+          </div>
+        )}
       </div>
 
+      {/* Modales */}
       {formModal && (
         <PersonFormModal
-          key={formModal.mode === "edit" ? formModal.person.id : "add"}
-          title={formModal.mode === "edit" ? "Editar persona" : "Registrar manual"}
-          initialData={formModal.mode === "edit" ? formModal.person : null}
-          onSave={savePerson}
+          mode={formModal.mode}
+          person={formModal.person}
+          onSave={handleSavePerson}
           onClose={() => setFormModal(null)}
+          error={modalError}
+          saving={savingPerson}
         />
       )}
 
       {hardDeleteTarget && (
         <HardDeleteModal
           person={hardDeleteTarget}
-          onConfirm={confirmHardDelete}
+          onConfirm={handleConfirmHardDelete}
           onClose={() => setHardDeleteTarget(null)}
         />
       )}

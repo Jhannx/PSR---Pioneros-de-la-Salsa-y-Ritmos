@@ -1,91 +1,167 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import BirthDateField from "../../../components/forms/BirthDateField";
 
-export default function PersonFormModal({ title, initialData, onSave, onClose }) {
-  const [firstName, setFirstName] = useState(initialData?.firstName || "");
-  const [lastName, setLastName] = useState(initialData?.lastName || "");
-  const [documento, setDocumento] = useState(initialData?.documento || "");
-  const [phone, setPhone] = useState(initialData?.phone || "");
+export default function PersonFormModal({ mode = "add", person, onSave, onClose, error, saving = false }) {
+  const [firstName, setFirstName] = useState(person?.firstName || "");
+  const [lastName, setLastName] = useState(person?.lastName || "");
+  const [documentType, setDocumentType] = useState(person?.documentType || "CC");
+  const [documentNumber, setDocumentNumber] = useState(person?.documentNumber || person?.documento || "");
+  const [phone, setPhone] = useState(person?.phone || "");
+  const [email, setEmail] = useState(person?.email || "");
+  const [birthDate, setBirthDate] = useState(person?.birthDate || "");
 
-  const canSave = firstName.trim() && lastName.trim() && documento.trim() && phone.trim();
+  // Obligatorio para registros nuevos, no para editar uno existente (NOTAS-PARA-FRONTEND.md §5):
+  // las personas registradas antes de este campo no lo tienen, y no hay por qué exigírselo recién
+  // al editar cualquier otro dato suyo.
+  const canSave =
+    firstName.trim() && lastName.trim() && documentNumber.trim() && (mode === "edit" || birthDate);
 
   function handleSave() {
     if (!canSave) return;
     onSave({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      documento: documento.trim(),
+      documentType,
+      documentNumber: documentNumber.trim(),
       phone: phone.trim(),
+      email: email.trim() || null,
+      birthDate: birthDate || null,
     });
   }
 
+  const title = mode === "edit" ? "Editar Persona" : "Agregar Persona";
+
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
-      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-md">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50 font-body">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-md shadow-2xl">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-white font-bold text-lg">{title}</h2>
+          <h2 className="text-white font-bold text-lg font-display">{title}</h2>
           <button onClick={onClose} className="text-neutral-500 hover:text-white">
             <X size={20} />
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className="text-neutral-400 text-xs font-medium">Nombre</label>
-            <input
-              autoFocus
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="Rosa"
-              className="w-full mt-1 bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
-            />
+        <div className="space-y-3 mb-5">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-neutral-400 text-xs font-semibold">Nombres</label>
+              <input
+                autoFocus
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Rosa"
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-neutral-400 text-xs font-semibold">Apellidos</label>
+              <input
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Martínez López"
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+              />
+            </div>
           </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-neutral-400 text-xs font-semibold">Tipo Doc.</label>
+              <select
+                value={documentType}
+                onChange={(e) => setDocumentType(e.target.value)}
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-2.5 py-2.5 text-white text-sm outline-none focus:border-emerald-500"
+              >
+                <option value="CC">CC</option>
+                <option value="TI">TI</option>
+                <option value="CE">CE</option>
+                <option value="PA">PA</option>
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="text-neutral-400 text-xs font-semibold">No. Documento</label>
+              <input
+                inputMode="numeric"
+                value={documentNumber}
+                onChange={(e) => setDocumentNumber(e.target.value.replace(/\D/g, ""))}
+                placeholder="1001234567"
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-neutral-400 text-xs font-semibold">Teléfono</label>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="300 123 4567"
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-neutral-400 text-xs font-semibold">Correo Electrónico (opcional)</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="correo@ejemplo.com"
+                className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
+
           <div>
-            <label className="text-neutral-400 text-xs font-medium">Apellidos</label>
-            <input
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              placeholder="Martínez López"
-              className="w-full mt-1 bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+            <label className="text-neutral-400 text-xs font-semibold">
+              Fecha de nacimiento{mode === "edit" ? " (opcional)" : ""}
+            </label>
+            <BirthDateField
+              value={birthDate}
+              onChange={setBirthDate}
+              className="mt-1"
+              selectClassName="bg-neutral-950 border border-neutral-800 rounded-xl px-2 py-2.5 text-white text-sm outline-none focus:border-emerald-500"
             />
+            {mode === "edit" && !person?.birthDate && (
+              <p className="text-neutral-600 text-[11px] mt-1">
+                Esta persona no tiene fecha de nacimiento registrada todavía.
+              </p>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-5">
-          <div>
-            <label className="text-neutral-400 text-xs font-medium">Documento</label>
-            <input
-              inputMode="numeric"
-              value={documento}
-              onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ""))}
-              placeholder="1001234567"
-              className="w-full mt-1 bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
-            />
-          </div>
-          <div>
-            <label className="text-neutral-400 text-xs font-medium">Teléfono</label>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="300 123 4567"
-              className="w-full mt-1 bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
-            />
-          </div>
-        </div>
-
-        {!initialData && (
-          <p className="text-neutral-600 text-xs mb-4 -mt-2">
-            Se crea con contraseña por defecto = su documento. La persona puede cambiarla luego desde su perfil.
+        {mode === "add" && (
+          <p className="text-neutral-500 text-xs mb-4">
+            Se crea con contraseña por defecto igual a su número de documento. Los roles se asignan luego desde "Roles y Accesos".
           </p>
         )}
 
-        <button
-          onClick={handleSave}
-          disabled={!canSave}
-          className="w-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 text-neutral-950 font-bold py-2.5 rounded-xl transition-colors"
-        >
-          Guardar
-        </button>
+        {/* El error de guardar vivía solo en la página de atrás, que este modal tapa por
+            completo (z-50 + fondo oscurecido) — un 409 de documento/teléfono duplicado no se
+            veía nunca, aunque el estado sí se actualizara (errores-12sep-front.md #9). */}
+        {error && (
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl">
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2.5 text-neutral-400 hover:text-white text-sm font-semibold disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!canSave || saving}
+            className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-neutral-950 font-bold text-sm px-5 py-2.5 rounded-xl transition-colors shadow-lg shadow-emerald-500/20"
+          >
+            {saving ? "Guardando…" : "Guardar Persona"}
+          </button>
+        </div>
       </div>
     </div>
   );

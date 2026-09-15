@@ -1,330 +1,456 @@
-import { useState } from "react";
-import { Plus, QrCode, CalendarDays, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Plus } from "lucide-react";
 import { formatCOP } from "../../utils/currency";
 import { formatHeaderDateShort as formatHeaderDate } from "../../utils/date";
-import { DAILY_RATE, matchesFilter, computeCounts, getUpcomingDays } from "../../features/reception/utils";
+import { DAILY_RATE as FALLBACK_RATE, getUpcomingDays } from "../../features/reception/utils";
 import QueueRow from "../../features/reception/components/QueueRow";
 import RefundModal from "../../features/reception/components/RefundModal";
-
-// Initial mock queue, in scan order — this order IS the line.
-//
-// Nota de rediseño: "atendido" (confirmar asistencia) y "amount" (dinero
-// registrado) son ahora completamente independientes — antes un solo
-// "status: paid" mezclaba las dos cosas. Por eso "amount" ya NO empieza
-// en DAILY_RATE por defecto: empieza en 0, porque nadie ha pagado nada
-// todavía hasta que el admin lo registre. Que alguien deba $4.000 desde
-// que llega es la realidad honesta, no un error.
-const initialQueue = [
-  { id: 1, name: "Juan Martínez", source: "qr", atendido: false, amount: 0, note: null },
-  { id: 2, name: "María López", source: "qr", atendido: true, amount: 4000, note: null },
-  { id: 3, name: "Carlos Ruiz", source: "qr", atendido: true, amount: 2000, note: null },
-  { id: 4, name: "Ana Torres", source: "qr", atendido: true, amount: 50000, note: null },
-  { id: 5, name: "Sofía Ramírez", source: "qr", atendido: false, amount: 4000, note: "Pagó 4 días por adelantado" },
-  { id: 6, name: "Pedro Gómez", source: "manual", atendido: false, amount: 0, note: null },
-];
-
-// Pool of names used only to simulate incoming QR scans during a live demo
-const SCAN_NAME_POOL = [
-  "Luisa Fernanda Rojas",
-  "Camilo Restrepo",
-  "Diana Marcela Ortiz",
-  "Andrés Felipe Cano",
-  "Paola Jiménez",
-  "Jorge Iván Castaño",
-];
+import { useMockData } from "../../context/DataContext";
+import { paymentsService } from "../../services/paymentsService";
+import { attendanceService } from "../../services/attendanceService";
+import { queueService } from "../../services/queueService";
 
 const FILTERS = [
-  { key: "all", label: "Todos" },
-  { key: "pending", label: "Sin atender" },
-  { key: "balance", label: "Con saldo" },
-  { key: "settled", label: "Al día" },
+  { key: "all", label: "TODOS" },
+  { key: "pending", label: "SIN ATENDER" },
+  { key: "balance", label: "SALDO PENDIENTE" },
+  { key: "settled", label: "AL DÍA" },
 ];
 
 export default function ReceptionCheckinPage() {
-  const [queue, setQueue] = useState(initialQueue);
-  const [nextId, setNextId] = useState(initialQueue.length + 1);
-  const [scanPoolIndex, setScanPoolIndex] = useState(0);
+  const { queue, updateQueueItem, refreshData } = useMockData();
   const [activeFilter, setActiveFilter] = useState("all");
+  const [dailyRate, setDailyRate] = useState(FALLBACK_RATE);
+  const [paymentMethods, setPaymentMethods] = useState([]);
 
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newName, setNewName] = useState("");
+  const [newDocumento, setNewDocumento] = useState("");
+  const [addingManual, setAddingManual] = useState(false);
+  const [addManualError, setAddManualError] = useState("");
 
   const [advanceModalId, setAdvanceModalId] = useState(null);
   const [selectedDays, setSelectedDays] = useState([0]);
+  const [refundTarget, setRefundTarget] = useState(null);
+  const [actionError, setActionError] = useState("");
 
-  const [refundTarget, setRefundTarget] = useState(null); // null | person
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [pricingRes, methodsRes] = await Promise.allSettled([
+          paymentsService.getPricing(),
+          paymentsService.getPaymentMethods(),
+        ]);
 
-  const totalCollected = queue.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        // `PricingResponse.amount` (openapi.md) — leía `.monto`, un campo que el backend nunca
+        // manda, así que esta condición era siempre falsa y la pantalla se quedaba callada con
+        // `FALLBACK_RATE` para siempre, aunque el fetch sí se hacía (errores-12sep-front.md #7).
+        if (pricingRes.status === "fulfilled" && pricingRes.value?.amount) {
+          setDailyRate(Number(pricingRes.value.amount));
+        }
 
-  const counts = computeCounts(queue);
-  const filteredQueue = queue.filter((p) => matchesFilter(p, activeFilter));
+        if (methodsRes.status === "fulfilled" && Array.isArray(methodsRes.value)) {
+          setPaymentMethods(methodsRes.value);
+        }
+      } catch (err) {
+        console.warn("No se cargaron datos de tarifa/métodos desde la API:", err);
+      }
+    }
+    loadData();
+  }, []);
 
-  function updateAmount(id, value) {
-    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, amount: value } : p)));
+  const totalCollected = queue.reduce((sum, p) => sum + Number(p.amountCharged || 0), 0);
+
+  const filteredQueue = queue.filter((item) => {
+    const balance = Number(item.balance || 0);
+    if (activeFilter === "pending") return !item.attended;
+    if (activeFilter === "balance") return balance !== 0;
+    if (activeFilter === "settled") return balance === 0;
+    return true;
+  });
+
+  const counts = {
+    all: queue.length,
+    pending: queue.filter((p) => !p.attended).length,
+    balance: queue.filter((p) => Number(p.balance || 0) !== 0).length,
+    settled: queue.filter((p) => Number(p.balance || 0) === 0).length,
+  };
+
+  async function handleAmountChange(checkinId, newAmount) {
+    const current = queue.find((p) => p.checkinId === checkinId);
+    if (!current) return;
+    const newBalance = newAmount - dailyRate;
+    updateQueueItem(checkinId, {
+      amountCharged: newAmount,
+      balance: newBalance,
+    });
   }
 
-  function settleBalance(id) {
-    // "Completar pago" / "Entregar vuelto" — ajusta el monto registrado
-    // para que el saldo quede en $0. No toca "atendido" para nada.
-    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, amount: DAILY_RATE } : p)));
+  async function handleSettle(checkinId) {
+    const item = queue.find((p) => p.checkinId === checkinId);
+    if (!item || !item.personId) return;
+    const owed = Math.abs(Number(item.balance || 0));
+    if (owed <= 0) return;
+    setActionError("");
+    try {
+      const defaultMethodId = paymentMethods[0]?.id || 1;
+      await paymentsService.createMovement({
+        personId: item.personId,
+        checkinId,
+        paymentMethodId: defaultMethodId,
+        amountReceived: owed,
+        amountApplied: owed,
+        note: "Cobro de entrada en recepción",
+      });
+      updateQueueItem(checkinId, {
+        amountCharged: dailyRate,
+        balance: 0.0,
+      });
+    } catch (err) {
+      setActionError(err.data?.message || err.message || "No se pudo registrar el cobro.");
+    }
   }
 
-  // Confirmar asistencia — acción propia, sin relación con el pago.
-  // Corresponde a sp_registrar_asistencia: crea la confirmación, cobra
-  // la tarifa vigente. No exige que "amount" ya esté en DAILY_RATE.
-  function confirmarAsistencia(id) {
-    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, atendido: true } : p)));
+  async function handleDeliverChange(checkinId) {
+    setActionError("");
+    try {
+      const movements = await paymentsService.getMovementsByCheckin(checkinId);
+      const paymentMovement = (Array.isArray(movements) ? movements : []).find(
+        (m) => m.movementType === "PAYMENT"
+      );
+      if (!paymentMovement) {
+        setActionError("No se encontró el movimiento original de pago para entregar el vuelto.");
+        return;
+      }
+      await paymentsService.deliverChange(paymentMovement.id);
+      updateQueueItem(checkinId, { amountCharged: dailyRate, balance: 0.0 });
+    } catch (err) {
+      setActionError(err.data?.message || err.message || "No se pudo entregar el vuelto.");
+    }
   }
 
-  // Anular — corresponde a sp_anular_asistencia: borra la confirmación
-  // por completo. El monto pagado NO se toca, sigue como estaba.
-  function anularAsistencia(id) {
-    setQueue((prev) => prev.map((p) => (p.id === id ? { ...p, atendido: false } : p)));
+  async function handleConfirmAttendance(checkinId) {
+    setActionError("");
+    try {
+      const attendance = await attendanceService.confirm(checkinId);
+      updateQueueItem(checkinId, {
+        attended: true,
+        attendanceId: attendance?.attendanceId ?? null,
+        markedAt: attendance?.markedAt ?? new Date().toISOString(),
+      });
+    } catch (err) {
+      setActionError(err.data?.message || err.message || "No se pudo confirmar la asistencia.");
+    }
   }
 
-  function addManualEntry() {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    setQueue((prev) => [
-      ...prev,
-      { id: nextId, name: trimmed, source: "manual", atendido: false, amount: 0, note: null },
-    ]);
-    setNextId((n) => n + 1);
-    setNewName("");
-    setShowAddModal(false);
+  async function handleUndoAttendance(checkinId) {
+    setActionError("");
+    try {
+      await attendanceService.cancel(checkinId);
+      updateQueueItem(checkinId, {
+        attended: false,
+        attendanceId: null,
+        markedAt: null,
+      });
+    } catch (err) {
+      setActionError(err.data?.message || err.message || "No se pudo anular la asistencia.");
+    }
   }
 
-  function simulateScan() {
-    const name = SCAN_NAME_POOL[scanPoolIndex % SCAN_NAME_POOL.length];
-    setScanPoolIndex((i) => i + 1);
-    setQueue((prev) => [
-      ...prev,
-      { id: nextId, name, source: "qr", atendido: false, amount: 0, note: null },
-    ]);
-    setNextId((n) => n + 1);
+  async function handleAddManualEntry() {
+    const documento = newDocumento.trim();
+    if (!documento) return;
+    setAddingManual(true);
+    setAddManualError("");
+    try {
+      await queueService.checkinByDocument(documento);
+      await refreshData();
+      setNewDocumento("");
+      setShowAddModal(false);
+    } catch (err) {
+      setAddManualError(err.data?.message || err.message || "No se pudo registrar el check-in.");
+    } finally {
+      setAddingManual(false);
+    }
   }
 
-  function openAdvanceModal(id) {
-    setAdvanceModalId(id);
-    setSelectedDays([0]);
-  }
-
-  function toggleDay(index) {
-    setSelectedDays((prev) =>
-      prev.includes(index) ? prev.filter((d) => d !== index) : [...prev, index].sort((a, b) => a - b)
-    );
-  }
-
-  // Pago por adelantado — SOLO registra el pago (sp_registrar_movimiento).
-  // A propósito no toca "atendido": pagar por adelantado no es lo mismo
-  // que estar aquí hoy. La persona puede estar pagando días futuros sin
-  // siquiera haber llegado todavía.
-  function confirmAdvancePayment() {
+  async function handleConfirmAdvancePayment() {
+    if (!advanceModalId) return;
     const days = selectedDays.length || 1;
-    setQueue((prev) =>
-      prev.map((p) =>
-        p.id === advanceModalId
-          ? { ...p, amount: DAILY_RATE, note: `Pagó ${days} día${days > 1 ? "s" : ""} por adelantado` }
-          : p
-      )
-    );
-    setAdvanceModalId(null);
-    setSelectedDays([0]);
+    const totalAdvance = dailyRate * days;
+    const item = queue.find((p) => p.checkinId === advanceModalId);
+    if (!item || !item.personId) return;
+
+    setActionError("");
+    try {
+      const defaultMethodId = paymentMethods[0]?.id || 1;
+      await paymentsService.createMovement({
+        personId: item.personId,
+        checkinId: advanceModalId,
+        paymentMethodId: defaultMethodId,
+        amountReceived: totalAdvance,
+        amountApplied: totalAdvance,
+        note: `Pago por adelantado (${days} días)`,
+      });
+      updateQueueItem(advanceModalId, {
+        amountCharged: totalAdvance,
+        balance: 0.0,
+        note: `Pagó ${days} día${days > 1 ? "s" : ""} por adelantado`,
+      });
+      setAdvanceModalId(null);
+      setSelectedDays([0]);
+    } catch (err) {
+      setActionError(err.data?.message || err.message || "No se pudo registrar el pago por adelantado.");
+    }
   }
 
-  // Reembolso — corresponde a sp_registrar_reembolso: dinero que entró y
-  // sale de verdad, distinto de corregir un monto mal digitado. Reduce
-  // lo abonado, sin borrar el pago original (aquí simplificado a solo
-  // bajar "amount", ya que el mock no modela movimientos por separado).
-  function confirmRefund(amount) {
+  async function handleConfirmRefund(amount, selectedMethodId) {
     if (!refundTarget) return;
-    setQueue((prev) =>
-      prev.map((p) =>
-        p.id === refundTarget.id ? { ...p, amount: Math.max(0, Number(p.amount || 0) - amount) } : p
-      )
-    );
-    setRefundTarget(null);
+    const current = queue.find((p) => p.checkinId === refundTarget.checkinId);
+    if (!current) {
+      setRefundTarget(null);
+      return;
+    }
+
+    setActionError("");
+    try {
+      const movements = await paymentsService.getMovementsByCheckin(refundTarget.checkinId);
+      const paymentMovement = (Array.isArray(movements) ? movements : []).find(
+        (m) => m.movementType === "PAYMENT"
+      );
+      if (!paymentMovement) {
+        setActionError("No se encontró el movimiento original de pago para reembolsar.");
+        return;
+      }
+      await paymentsService.processRefund(paymentMovement.id, {
+        paymentMethodId: selectedMethodId,
+        amount,
+        note: "Reembolso solicitado en recepción",
+      });
+      const newAmount = Math.max(0, Number(current.amountCharged || 0) - amount);
+      updateQueueItem(refundTarget.checkinId, {
+        amountCharged: newAmount,
+        balance: newAmount - dailyRate,
+      });
+      setRefundTarget(null);
+    } catch (err) {
+      setActionError(err.data?.message || err.message || "No se pudo procesar el reembolso.");
+    }
   }
 
-  const advancePerson = queue.find((p) => p.id === advanceModalId);
+  const advancePerson = queue.find((p) => p.checkinId === advanceModalId);
   const upcomingDays = getUpcomingDays(10);
 
   return (
-    <div className="min-h-screen w-full bg-neutral-950 px-6 py-8">
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
+    <div className="min-h-screen w-full bg-neutral-950 px-4 md:px-6 py-4 font-body">
+      <div className="max-w-6xl mx-auto space-y-3">
+        {/* Encabezado compacto */}
+        <div className="flex items-center justify-between gap-4 border-b border-neutral-800 pb-3 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold text-white">Aeróbicos · {formatHeaderDate(new Date())}</h1>
-            <p className="text-neutral-500 text-sm mt-1">
-              Tarifa del día: <span className="text-neutral-300 font-semibold">{formatCOP(DAILY_RATE)}</span>
-              <span className="mx-2 text-neutral-700">·</span>
-              Recaudado hoy: <span className="text-emerald-400 font-semibold">{formatCOP(totalCollected)}</span>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-white tracking-tight">Aeróbicos</h1>
+              <span className="text-xs font-semibold text-neutral-500">
+                · {formatHeaderDate(new Date())}
+              </span>
+            </div>
+            <p className="text-neutral-400 text-xs mt-0.5">
+              Tarifa día: <span className="text-white font-bold">{formatCOP(dailyRate)}</span>
+              <span className="mx-2 text-neutral-700">|</span>
+              Recaudado hoy: <span className="text-emerald-400 font-bold">{formatCOP(totalCollected)}</span>
             </p>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={simulateScan}
-              className="flex items-center gap-2 border border-neutral-700 text-neutral-300 hover:bg-neutral-800 font-semibold text-sm px-4 py-2.5 rounded-xl transition-colors"
-            >
-              <QrCode size={16} />
-              Simular escaneo
-            </button>
+
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 bg-white text-neutral-950 hover:bg-neutral-200 font-semibold text-sm px-4 py-2.5 rounded-xl transition-colors"
+              className="flex items-center gap-1.5 bg-white hover:bg-neutral-200 text-neutral-950 text-xs font-bold px-3.5 py-1.5 rounded-full transition-colors shadow-md"
             >
-              <Plus size={16} />
-              Agregar sin QR
+              <Plus size={14} />
+              + Agregar Manual
             </button>
           </div>
         </div>
 
-        {/* Filters: change what's visible, never the underlying scan order */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        {actionError && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl">
+            {actionError}
+          </div>
+        )}
+
+        {/* Pastillas de filtro */}
+        <div className="flex flex-wrap gap-1.5">
           {FILTERS.map((f) => {
             const active = activeFilter === f.key;
             return (
               <button
                 key={f.key}
                 onClick={() => setActiveFilter(f.key)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-semibold border transition-colors ${
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-colors border ${
                   active
                     ? "bg-white text-neutral-950 border-white"
                     : "bg-neutral-900 text-neutral-400 border-neutral-800 hover:border-neutral-700"
                 }`}
               >
-                {f.label}
+                <span>{f.label}</span>
                 <span
-                  className={`text-xs px-1.5 py-0.5 rounded-full ${
-                    active ? "bg-neutral-950/10 text-neutral-950" : "bg-neutral-800 text-neutral-500"
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                    active ? "bg-neutral-950/10 text-neutral-950 font-extrabold" : "bg-neutral-800 text-neutral-400"
                   }`}
                 >
-                  {counts[f.key]}
+                  ({counts[f.key]})
                 </span>
               </button>
             );
           })}
         </div>
 
-        {/* Column labels */}
-        <div className="flex items-center gap-4 px-4 pb-2 text-xs font-semibold text-neutral-600 uppercase tracking-wide">
-          <span className="w-6 text-center">#</span>
-          <span className="flex-1">Persona</span>
-          <span className="w-32">Monto pagado</span>
-          <span className="w-36 text-right">Saldo</span>
-          <span className="w-36 text-right">Asistencia</span>
-          <span className="w-9"></span>
-        </div>
-
-        {/* Queue — position (#) always reflects the true scan order,
-            even when a filter is hiding other rows */}
-        <div className="flex flex-col gap-2">
-          {filteredQueue.map((person) => {
-            const position = queue.findIndex((p) => p.id === person.id) + 1;
-            return (
-              <QueueRow
-                key={person.id}
-                person={person}
-                position={position}
-                onAmountChange={(value) => updateAmount(person.id, value)}
-                onSettle={() => settleBalance(person.id)}
-                onConfirmar={() => confirmarAsistencia(person.id)}
-                onAnular={() => anularAsistencia(person.id)}
-                onOpenAdvance={() => openAdvanceModal(person.id)}
-                onOpenRefund={() => setRefundTarget(person)}
-              />
-            );
-          })}
-          {filteredQueue.length === 0 && (
-            <div className="text-center py-10 text-neutral-600 text-sm">
-              No hay nadie en esta categoría por ahora.
+        {/* Lista de Fila de Recepción */}
+        <div className="flex flex-col gap-2.5">
+          {filteredQueue.length === 0 ? (
+            <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-8 text-center text-neutral-500 text-sm">
+              No hay personas registradas en la fila de recepción con los filtros seleccionados.
             </div>
+          ) : (
+            filteredQueue.map((item, index) => (
+              <QueueRow
+                key={item.checkinId || index}
+                item={item}
+                position={index + 1}
+                onAmountChange={(val) => handleAmountChange(item.checkinId, val)}
+                onSettle={() => handleSettle(item.checkinId)}
+                onDeliverChange={() => handleDeliverChange(item.checkinId)}
+                onConfirmAttendance={() => handleConfirmAttendance(item.checkinId)}
+                onUndoAttendance={() => handleUndoAttendance(item.checkinId)}
+                onOpenAdvance={() => {
+                  setAdvanceModalId(item.checkinId);
+                  setSelectedDays([0]);
+                }}
+                onOpenRefund={() => setRefundTarget(item)}
+              />
+            ))
           )}
         </div>
       </div>
 
-      {/* Modal: add someone without a phone/QR */}
+      {/* Modal Agregar Manualmente */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-white font-bold text-lg">Agregar sin QR</h2>
-              <button onClick={() => setShowAddModal(false)} className="text-neutral-500 hover:text-white">
-                <X size={20} />
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-sm">
+            <h3 className="text-lg font-bold text-white mb-1">Agregar a la fila</h3>
+            <p className="text-neutral-500 text-xs mb-4">
+              La persona debe estar registrada previamente. Se busca por su número de documento.
+            </p>
+            <div className="space-y-3 mb-4">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoFocus
+                value={newDocumento}
+                onChange={(e) => setNewDocumento(e.target.value.replace(/\D/g, ""))}
+                placeholder="Número de documento"
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-3 text-white placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors text-sm"
+              />
+            </div>
+            {addManualError && (
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl">
+                {addManualError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  setAddManualError("");
+                }}
+                className="px-4 py-2 text-neutral-400 hover:text-white text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAddManualEntry}
+                disabled={!newDocumento.trim() || addingManual}
+                className="bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 text-neutral-950 font-bold text-sm px-4 py-2 rounded-xl transition-colors"
+              >
+                {addingManual ? "Agregando..." : "Agregar"}
               </button>
             </div>
-            <label className="text-neutral-400 text-sm font-medium">Nombre completo</label>
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addManualEntry()}
-              placeholder="Ej. Rosa Martínez"
-              className="w-full mt-1.5 mb-4 bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
-            />
-            <button
-              onClick={addManualEntry}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold py-2.5 rounded-xl transition-colors"
-            >
-              Agregar a la fila
-            </button>
           </div>
         </div>
       )}
 
-      {/* Modal: pay several days at once — SOLO pago, no toca asistencia */}
+      {/* Modal Pago por Adelantado */}
       {advanceModalId && advancePerson && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 w-full max-w-sm">
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-white font-bold text-lg">Pago por varios días</h2>
-              <button onClick={() => setAdvanceModalId(null)} className="text-neutral-500 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
-            <p className="text-neutral-500 text-sm mb-4">{advancePerson.name}</p>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold text-white mb-1 font-display">Pago por Adelantado</h3>
+            <p className="text-neutral-400 text-sm mb-4">
+              Registrar sesiones futuras para{" "}
+              <span className="text-white font-bold">{`${advancePerson.firstName || ""} ${advancePerson.lastName || ""}`}</span>
+            </p>
 
-            <div className="grid grid-cols-5 gap-2 mb-4">
-              {upcomingDays.map((day, index) => {
-                const selected = selectedDays.includes(index);
+            <div className="grid grid-cols-2 gap-2 mb-6 max-h-48 overflow-y-auto">
+              {upcomingDays.map((day, idx) => {
+                const selected = selectedDays.includes(idx);
                 return (
                   <button
-                    key={index}
-                    onClick={() => toggleDay(index)}
-                    className={`flex flex-col items-center py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDays((prev) =>
+                        prev.includes(idx) ? prev.filter((d) => d !== idx) : [...prev, idx].sort((a, b) => a - b)
+                      );
+                    }}
+                    className={`p-2.5 rounded-xl border text-left text-xs transition-colors ${
                       selected
-                        ? "bg-emerald-500 border-emerald-500 text-neutral-950"
-                        : "bg-neutral-800 border-neutral-700 text-neutral-400"
+                        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400 font-semibold"
+                        : "bg-neutral-950 border-neutral-800 text-neutral-400 hover:border-neutral-700"
                     }`}
                   >
-                    <span>{day.weekday}</span>
-                    <span className="text-xs opacity-80">{day.date}</span>
+                    {day.label}
                   </button>
                 );
               })}
             </div>
 
-            <div className="flex items-center justify-between text-sm mb-4">
-              <span className="text-neutral-500">
-                {selectedDays.length} día{selectedDays.length !== 1 ? "s" : ""} seleccionado{selectedDays.length !== 1 ? "s" : ""}
-              </span>
-              <span className="text-white font-bold">{formatCOP(DAILY_RATE * (selectedDays.length || 1))}</span>
+            <div className="flex items-center justify-between border-t border-neutral-800 pt-4">
+              <div>
+                <span className="text-neutral-500 text-xs block">Total a registrar:</span>
+                <span className="text-emerald-400 font-bold text-lg">
+                  {formatCOP(dailyRate * (selectedDays.length || 1))}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setAdvanceModalId(null)}
+                  className="px-4 py-2 text-neutral-400 hover:text-white text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmAdvancePayment}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold text-sm px-4 py-2 rounded-xl transition-colors"
+                >
+                  Confirmar Pago
+                </button>
+              </div>
             </div>
-
-            <button
-              onClick={confirmAdvancePayment}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold py-2.5 rounded-xl transition-colors"
-            >
-              Confirmar pago
-            </button>
           </div>
         </div>
       )}
 
-      {/* Modal: reembolso real — dinero que sale, distinto de corregir un monto */}
+      {/* Modal Reembolso */}
       {refundTarget && (
-        <RefundModal person={refundTarget} onConfirm={confirmRefund} onClose={() => setRefundTarget(null)} />
+        <RefundModal
+          person={{
+            name: `${refundTarget.firstName || ""} ${refundTarget.lastName || ""}`,
+            amount: refundTarget.amountCharged,
+          }}
+          onConfirm={handleConfirmRefund}
+          onClose={() => {
+            setRefundTarget(null);
+            setActionError("");
+          }}
+          error={actionError}
+        />
       )}
     </div>
   );
