@@ -30,6 +30,22 @@ public interface EmailChangeTokenRepository extends JpaRepository<EmailChangeTok
     @Query("DELETE FROM EmailChangeToken t WHERE t.user.id = :userId")
     void deleteByUserId(@Param("userId") Integer userId);
 
+    /**
+     * Consume el token y dice si lo consiguió: 1 si esta llamada fue la que lo borró, 0 si otra se le
+     * adelantó. Es la forma de que "un solo uso" lo decida la base y no una comprobación previa.
+     * <p>
+     * {@code delete(entidad)} no sirve para esto: Hibernate exige que la fila siga ahí y, si otra
+     * transacción ya la borró, revienta con {@code Unexpected row count (expected 1 but was 0)} —una
+     * excepción de infraestructura que sale como 500 sin mensaje. Pasa con un doble clic, dos pestañas
+     * abiertas o un reintento de red, que en un enlace de correo no son casos raros.
+     * <p>
+     * flushAutomatically vacía antes lo que hubiera pendiente; no se limpia el contexto a propósito,
+     * para que el User ya cargado siga gestionado y se le pueda escribir el correo nuevo después.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("DELETE FROM EmailChangeToken t WHERE t.id = :id")
+    int consume(@Param("id") Integer id);
+
     @Modifying
     @Query("DELETE FROM EmailChangeToken t WHERE t.expiresAt < :now")
     int deleteExpired(@Param("now") OffsetDateTime now);

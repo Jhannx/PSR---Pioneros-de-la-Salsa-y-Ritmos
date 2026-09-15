@@ -2,9 +2,11 @@ package com.jhanp.psraerobicsbackend.modules.aerobics.payment.service.impl;
 
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.AccountMovementPatchRequest;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.AccountMovementRequest;
+import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.PersonRefundRequest;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.RefundRequest;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.response.AccountMovementResponse;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.response.PendingChangeViewResponse;
+import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.response.PersonRefundResponse;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.entity.AccountMovement;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.mapper.AccountMovementMapper;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.mapper.PendingChangeViewMapper;
@@ -14,6 +16,7 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.payment.repository.PaymentM
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.repository.PendingChangeViewRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.service.interfaces.IAccountMovementService;
 import com.jhanp.psraerobicsbackend.modules.aerobics.queue.event.QueueChangedEvent;
+import com.jhanp.psraerobicsbackend.shared.exception.InvalidDataException;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
 import com.jhanp.psraerobicsbackend.shared.persistence.AuditContextRepository;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +27,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -88,6 +93,79 @@ public class AccountMovementService implements IAccountMovementService {
 
         log.info("Reembolso registrado: ID {}, Original ID {}, Monto {}", refund.getId(), originalMovementId, request.amount());
         return accountMovementMapper.toResponse(refund);
+    }
+
+    /**
+     * Reparte un monto entre los abonos de la persona que aún tienen saldo por devolver.
+     * <p>
+     * FIFO: el abono más antiguo primero. Es una decisión de negocio y por eso vive aquí y no en el
+     * frontend — determina contra qué movimiento queda registrada cada devolución, y se elige FIFO
+     * porque es el criterio que quien atiende puede explicar en voz alta.
+     * <p>
+     * <b>Todo o nada.</b> El @Transactional cubre las N llamadas al procedimiento, así que si una
+     * falla se deshacen las anteriores. Eso es lo que arregla el problema real del encadenado desde el
+     * frontend: allí cada llamada era su propia transacción y un fallo a mitad dejaba dinero devuelto
+     * a medias, sin forma de saber cuánto.
+     * <p>
+     * Se comprueba el total disponible ANTES de emitir nada. Sin esa comprobación previa el reparto
+     * iría creando reembolsos hasta quedarse corto y solo entonces fallaría: correcto por la
+     * transacción, pero desperdicia el trabajo y el mensaje de error llegaría desde el procedimiento,
+     * hablando de un abono suelto en vez de del total que falta.
+     */
+    @Override
+    @Transactional
+    public PersonRefundResponse refundByPerson(Integer personId, PersonRefundRequest request,
+                                               Integer registeredByUserId) {
+
+        List<AccountMovementRepository.RefundableMovement> refundable =
+                accountMovementRepository.findRefundableByPerson(personId);
+
+        BigDecimal available = refundable.stream()
+                .map(AccountMovementRepository.RefundableMovement::getAvailable)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        if (available.compareTo(request.amount()) < 0) {
+            throw new InvalidDataException(
+                    "No se puede reembolsar " + request.amount() + ": la persona solo tiene "
+                            + available + " pendiente de devolver.");
+        }
+
+        List<PersonRefundResponse.Allocation> allocations = new ArrayList<>();
+        BigDecimal pending = request.amount();
+
+        for (AccountMovementRepository.RefundableMovement movement : refundable) {
+            if (pending.signum() == 0) {
+                break;
+            }
+
+            // De este abono sale lo que quede por repartir, o todo su saldo si no alcanza.
+            BigDecimal take = pending.min(movement.getAvailable());
+
+            accountMovementProcedureRepository.registerRefund(
+                    movement.getMovementId(), take, registeredByUserId,
+                    request.paymentMethodId(), request.note());
+
+            // Patrón H, igual que en registerRefund: el procedimiento no devuelve el id.
+            AccountMovement refund = accountMovementRepository
+                    .findTopByOriginalMovementIdOrderByTimestampDesc(movement.getMovementId())
+                    .orElseThrow(() -> new IllegalStateException(
+                            "El reembolso contra el movimiento " + movement.getMovementId()
+                                    + " no se registró correctamente."));
+
+            allocations.add(new PersonRefundResponse.Allocation(
+                    movement.getMovementId(), refund.getId(), take,
+                    movement.getAvailable().subtract(take)));
+
+            pending = pending.subtract(take);
+        }
+
+        log.info("Reembolso por persona: Persona {}, Monto {}, repartido entre {} abono(s)",
+                personId, request.amount(), allocations.size());
+
+        // Mueve el saldo del panel igual que un abono, así que la fila tiene que enterarse.
+        eventPublisher.publishEvent(QueueChangedEvent.payment(null));
+
+        return new PersonRefundResponse(personId, request.amount(), allocations);
     }
 
     @Override

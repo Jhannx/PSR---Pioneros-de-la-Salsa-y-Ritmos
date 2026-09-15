@@ -152,13 +152,19 @@ BEGIN
         RAISE EXCEPTION 'Ya existe una sesión para el horario % en la fecha %', p_horario_id, p_fecha;
     END IF;
 
-    -- Si se asigna profesor, debe tener el rol PROFESOR.
+    -- Quien dicta la clase debe ser PROFESOR o ADMIN.
+    --
+    -- ADMIN entra aquí a partir del 13-sep: en una academia pequeña quien administra también da
+    -- clase, y obligar a darse a sí mismo el rol PROFESOR para poder aparecer en el selector era
+    -- papeleo que además ensucia los permisos. El nombre del parámetro se queda como
+    -- p_profesor_usuario_id para no romper a quien ya lo llama.
     IF p_profesor_usuario_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM usuario_rol ur
                           JOIN rol r ON r.id = ur.rol_id
-        WHERE ur.usuario_id = p_profesor_usuario_id AND r.nombre = 'PROFESOR'
+        WHERE ur.usuario_id = p_profesor_usuario_id
+          AND r.nombre IN ('PROFESOR', 'ADMIN')
     ) THEN
-        RAISE EXCEPTION 'El usuario % no tiene el rol PROFESOR', p_profesor_usuario_id;
+        RAISE EXCEPTION 'El usuario % no puede dictar clase: necesita rol PROFESOR o ADMIN', p_profesor_usuario_id;
     END IF;
 
     INSERT INTO sesion (horario_id, fecha, hora_inicio, hora_fin, profesor_usuario_id)
@@ -246,8 +252,10 @@ CREATE OR REPLACE PROCEDURE sp_registrar_reembolso(
 )
     LANGUAGE plpgsql AS $$
 DECLARE
-    v_persona_id      INTEGER;
-    v_monto_original  NUMERIC;
+    v_persona_id        INTEGER;
+    v_monto_original    NUMERIC;
+    v_ya_reembolsado    NUMERIC;
+    v_disponible        NUMERIC;
 BEGIN
     SELECT persona_id, monto_abonado INTO v_persona_id, v_monto_original
     FROM movimiento_cuenta
@@ -261,8 +269,22 @@ BEGIN
         RAISE EXCEPTION 'El monto del reembolso debe ser positivo';
     END IF;
 
-    IF p_monto > v_monto_original THEN
-        RAISE EXCEPTION 'El reembolso (%) no puede superar el monto original abonado (%)', p_monto, v_monto_original;
+    -- Lo ya devuelto contra ESTE abono. Los reembolsos guardan monto_abonado en negativo, de ahí el
+    -- signo cambiado al sumarlos.
+    --
+    -- Sin esta resta el tope se comparaba siempre contra el abono entero, así que un mismo abono de
+    -- 2500 se podía reembolsar cuantas veces se quisiera, 2500 cada vez: la validación parecía
+    -- proteger y no protegía nada. Es un agujero de dinero, no una imprecisión.
+    SELECT COALESCE(SUM(-monto_abonado), 0) INTO v_ya_reembolsado
+    FROM movimiento_cuenta
+    WHERE movimiento_original_id = p_movimiento_original_id
+      AND tipo_movimiento = 'REEMBOLSO';
+
+    v_disponible := v_monto_original - v_ya_reembolsado;
+
+    IF p_monto > v_disponible THEN
+        RAISE EXCEPTION 'El reembolso (%) supera lo que queda por devolver de ese abono (%). Abonado: %, ya devuelto: %',
+            p_monto, v_disponible, v_monto_original, v_ya_reembolsado;
     END IF;
 
     INSERT INTO movimiento_cuenta
@@ -300,7 +322,9 @@ DECLARE
     v_usuario_id INTEGER;
 BEGIN
     IF NOT p_force THEN
-        RAISE EXCEPTION 'sp_eliminar_persona exige force = true — esta operación es irreversible';
+        -- 75000: habla del procedimiento y de su parámetro, no de nada que el usuario pueda corregir.
+        RAISE EXCEPTION 'sp_eliminar_persona exige force = true — esta operación es irreversible'
+            USING ERRCODE = '75000';
     END IF;
 
     IF p_persona_id = 999999999 THEN

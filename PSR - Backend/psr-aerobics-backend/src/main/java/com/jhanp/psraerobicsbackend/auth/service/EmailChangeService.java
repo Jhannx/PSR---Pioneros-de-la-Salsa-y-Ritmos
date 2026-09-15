@@ -101,9 +101,23 @@ public class EmailChangeService implements IEmailChangeService {
         User user = token.getUser();
         String newEmail = token.getNewEmail();
 
+        // Se consume ANTES de validar nada más, y ese orden importa.
+        //
+        // Consumirlo es lo que convierte "un solo uso" en una garantía: quien se lleve la fila es el
+        // único que sigue, y cualquier otra llegada —doble clic, dos pestañas, un reintento de red—
+        // se encuentra con 0 y sale por el mensaje de abajo. Si en vez de esto se comprobara primero
+        // y se borrara al final, dos peticiones simultáneas pasarían las dos comprobaciones y la
+        // segunda reventaría con "Unexpected row count", que es un 500 sin explicación.
+        //
+        // Que el token se gaste aunque después falle por expirado o por correo duplicado es correcto
+        // y ya era el comportamiento anterior: en los dos casos ese enlace no vuelve a servir.
+        if (tokenRepository.consume(token.getId()) == 0) {
+            log.warn("Token de cambio de correo ya consumido para la cuenta ID {}", user.getId());
+            throw new InvalidDataException("El enlace no es válido o ya fue utilizado");
+        }
+
         if (token.isExpired()) {
             log.warn("Token de cambio de correo expirado para la cuenta ID {}", user.getId());
-            tokenRepository.delete(token);
             throw new InvalidDataException("El enlace expiró. Solicita el cambio de correo otra vez.");
         }
 
@@ -111,13 +125,9 @@ public class EmailChangeService implements IEmailChangeService {
         // pasado cualquier cosa. Sin esto, el UNIQUE de usuario.correo saltaría como error genérico
         // de base de datos y la persona vería un 500 en vez de saber qué pasó.
         if (userRepository.existsByEmailIgnoreCase(newEmail)) {
-            tokenRepository.delete(token);
             throw new DuplicateResourceException(
                     "Ya existe una cuenta con el correo " + newEmail + ". El cambio no se aplicó.");
         }
-
-        // Un solo uso: si alguien reenvía el mismo enlace, ya no sirve.
-        tokenRepository.delete(token);
 
         user.setEmail(newEmail);
         userRepository.save(user);

@@ -6,10 +6,14 @@ import com.jhanp.psraerobicsbackend.modules.person.enums.RegistrationSource;
 import com.jhanp.psraerobicsbackend.modules.person.service.interfaces.IPersonService;
 import com.jhanp.psraerobicsbackend.modules.user.dto.response.UserResponse;
 import com.jhanp.psraerobicsbackend.modules.user.service.interfaces.IUserService;
+import com.jhanp.psraerobicsbackend.shared.exception.InvalidDataException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.Period;
 
 /**
  * Orquesta las dos formas de dar de alta a una persona, que son endpoints distintos con permisos
@@ -30,6 +34,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Slf4j
 public class RegisterService {
+
+    /** Mayoría de edad en Colombia. Ver validateIsAdult: es una restricción de la v1, no definitiva. */
+    private static final int MINIMUM_AGE = 18;
 
     private final IPersonService personService;
     private final IUserService userService;
@@ -54,6 +61,8 @@ public class RegisterService {
      * registrada. Nadie debe existir a medias, sin forma de entrar.
      */
     private PersonResponse register(PersonRequest request, RegistrationSource source) {
+        validateIsAdult(request.birthDate());
+
         Integer personId = personService.createPerson(request, source);
 
         UserResponse user = userService.createForPerson(
@@ -69,6 +78,29 @@ public class RegisterService {
 
         log.info("Alta completada: persona {} con cuenta {}", personId, user.id());
         return personService.findById(personId);
+    }
+
+    /**
+     * Solo mayores de edad en la v1.
+     * <p>
+     * No es una regla del negocio —una academia de aeróbicos no tiene por qué excluir a menores— sino
+     * de tratamiento de datos: un menor exige consentimiento de quien ejerce la patria potestad, y eso
+     * es un flujo entero (quién lo da, cómo se guarda, cómo se revoca) que no existe todavía. Hasta
+     * que exista, es más honesto rechazar el alta que registrar a un menor sin el respaldo legal.
+     * <p>
+     * Va aquí y no en PersonRequest porque este es el único punto por el que pasan las dos altas, la
+     * de admin y el autoregistro. Con un @NotNull ya garantizado sobre birthDate no hay forma de
+     * esquivarla mandando el campo vacío.
+     * <p>
+     * Se calcula con Period y no restando años: así el que cumple 18 hoy entra, y el que los cumple
+     * mañana no.
+     */
+    private void validateIsAdult(LocalDate birthDate) {
+        if (Period.between(birthDate, LocalDate.now()).getYears() < MINIMUM_AGE) {
+            log.warn("Alta rechazada por edad: la persona no alcanza los {} años", MINIMUM_AGE);
+            throw new InvalidDataException(
+                    "Solo pueden registrarse personas mayores de " + MINIMUM_AGE + " años.");
+        }
     }
 
     /**

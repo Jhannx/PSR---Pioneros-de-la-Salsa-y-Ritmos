@@ -13,8 +13,12 @@ BEGIN
     v_valor := current_setting('app.usuario_id', true);
 
     IF v_valor IS NULL OR v_valor = '' THEN
+        -- 75000 = fallo del programa, no del usuario: sale como 500 genérico y el detalle se queda
+        -- en el log. Sin este código el mensaje llegaría al navegador, y hablar de set_config no
+        -- ayuda a nadie que no sea quien programa.
         RAISE EXCEPTION 'app.usuario_id no está configurado en esta transacción. '
-            'Ejecuta SELECT set_config(''app.usuario_id'', ''<id>'', true) antes de modificar datos auditables.';
+            'Ejecuta SELECT set_config(''app.usuario_id'', ''<id>'', true) antes de modificar datos auditables.'
+            USING ERRCODE = '75000';
     END IF;
 
     RETURN v_valor::INTEGER;

@@ -251,10 +251,59 @@ public class GlobalExceptionHandler {
                 return handleNoActiveSession(new NoActiveSessionException(
                         "No hay ninguna clase vigente en este momento"));
             }
+
+            // 75000 es nuestro "esto es un fallo del programa, no del usuario": se registra entero y
+            // sale como 500 genérico. Va ANTES del P0001 de abajo justamente para eso.
+            if ("75000".equals(sqlState)) {
+                log.error("Fallo interno lanzado desde la base de datos: ", ex);
+                return build(HttpStatus.INTERNAL_SERVER_ERROR, "Error interno del servidor");
+            }
+
+            // P0001 es el SQLSTATE que Postgres asigna a un RAISE EXCEPTION sin código propio, y en
+            // este proyecto esos RAISE son reglas de negocio escritas en el procedimiento: "el
+            // reembolso no puede superar el monto original", "la llegada ya fue atendida", "la fecha
+            // cae en otro día del que es el horario". El mensaje ya está redactado para una persona.
+            //
+            // Antes caían en el 500 de abajo y el frontend recibía "Error interno del servidor" con
+            // el motivo real perdido en el log. Eso convertía cada regla nueva del SQL en un 500
+            // silencioso, y es el fallo que se repetía ronda tras ronda: no era un endpoint, era la
+            // familia entera.
+            //
+            // Es 400 y no 409 porque lo que se rechaza es el contenido de la petición —un monto, un
+            // id, una fecha—, no un choque con el estado actual del recurso.
+            //
+            // OJO al escribir un RAISE nuevo en el SQL: por defecto su mensaje se le enseña al
+            // usuario. Si el mensaje habla de tablas, parámetros o procedimientos, lleva
+            // USING ERRCODE = '75000' para que quede dentro.
+            if ("P0001".equals(sqlState)) {
+                log.warn("Regla de negocio rechazada desde la base de datos: {}", sql.getMessage());
+                return build(HttpStatus.BAD_REQUEST, businessMessage(sql));
+            }
         }
 
         log.error("Error de base de datos no controlado: ", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Error interno del servidor");
+    }
+
+    /**
+     * El texto del RAISE, limpio, para enseñárselo a quien hizo la petición.
+     * <p>
+     * Se lee de {@link SQLException#getMessage()} y no del {@code ServerErrorMessage} del driver
+     * porque PSQLException está en scope runtime: no se puede nombrar en tiempo de compilación. A
+     * cambio hay que quitar a mano el prefijo "ERROR: " que algunas versiones del driver anteponen, y
+     * cortar por la primera línea — cuando la excepción sale de una función anidada, el driver añade
+     * debajo un bloque "Where: PL/pgSQL function ..." que es ruido para el usuario y filtra los
+     * nombres internos.
+     */
+    private String businessMessage(SQLException sql) {
+        String message = sql.getMessage();
+
+        if (message == null || message.isBlank()) {
+            return "La operación no se pudo completar";
+        }
+
+        String firstLine = message.lines().findFirst().orElse(message).trim();
+        return firstLine.startsWith("ERROR: ") ? firstLine.substring(7).trim() : firstLine;
     }
 
     // Error 500 - Problema con el servidor

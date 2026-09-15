@@ -2,9 +2,11 @@ package com.jhanp.psraerobicsbackend.modules.aerobics.payment.service.interfaces
 
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.AccountMovementPatchRequest;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.AccountMovementRequest;
+import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.PersonRefundRequest;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.request.RefundRequest;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.response.AccountMovementResponse;
 import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.response.PendingChangeViewResponse;
+import com.jhanp.psraerobicsbackend.modules.aerobics.payment.dto.response.PersonRefundResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -28,6 +30,21 @@ public interface IAccountMovementService {
     AccountMovementResponse registerRefund(Integer originalMovementId,
                                            RefundRequest request,
                                            Integer registeredByUserId);
+
+    /**
+     * Devuelve un monto a una persona sin que quien llama tenga que decidir contra qué abonos va.
+     * <p>
+     * Reparte FIFO —del abono más antiguo al más reciente— entre los que aún tienen saldo por
+     * devolver, y lo hace en UNA transacción: o se aplica entero o no se aplica nada. Si el total
+     * disponible no alcanza, falla con 400 antes de emitir ningún movimiento.
+     * <p>
+     * Existe porque el reparto es regla de negocio y estaba viviendo en el frontend, encadenando una
+     * llamada a {@link #registerRefund} por abono. Aquello funcionaba, pero cada llamada era su propia
+     * transacción y un fallo a mitad dejaba dinero devuelto a medias.
+     */
+    PersonRefundResponse refundByPerson(Integer personId,
+                                        PersonRefundRequest request,
+                                        Integer registeredByUserId);
 
     /**
      * Corrección de un movimiento ya registrado (monto o método mal digitado), vía JPA. Solo aplica

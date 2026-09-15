@@ -26,6 +26,14 @@ public interface SessionRepository extends JpaRepository<Session, Integer> {
     Optional<Session> findByScheduleIdAndDate(Integer scheduleId, LocalDate date);
 
     /**
+     * Para SessionCreationScheduler, que solo necesita saber si ya existe y no la fila entera.
+     * <p>
+     * Cuenta también las canceladas, y es intencionado: si un admin cancela una clase generada, esto
+     * es lo que impide que el siguiente barrido se la vuelva a crear.
+     */
+    boolean existsByScheduleIdAndDate(Integer scheduleId, LocalDate date);
+
+    /**
      * Sesión del día todavía en curso: sin hora de fin y no cancelada.
      */
     Optional<Session> findByDateAndEndTimeIsNullAndCancelledFalse(LocalDate date);

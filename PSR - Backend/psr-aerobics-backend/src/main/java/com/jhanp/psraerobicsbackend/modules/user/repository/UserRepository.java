@@ -104,24 +104,30 @@ public interface UserRepository extends JpaRepository<User, Integer> {
     Page<User> search(@Param("term") String term, Pageable pageable);
 
     /**
-     * Usuarios activos con un rol dado; sirve para listar los profesores asignables a una sesión.
+     * Usuarios activos que tengan ALGUNO de los roles dados; sirve para listar los instructores
+     * asignables a una sesión (PROFESOR o ADMIN).
      * <p>
      * Nativa a propósito, como las de búsqueda de arriba. rol.nombre es un enum de Postgres
      * (rol_nombre_enum), pero RoleNameConverter lo bindea como varchar, y Postgres no sabe comparar
      * los dos tipos: en JPQL esto fallaba con "operator does not exist: rol_nombre_enum = character
      * varying". JPQL no tiene forma de expresar el CAST a un tipo propio de la base, así que la
-     * consulta baja a SQL para poder escribirlo.
+     * consulta baja a SQL para poder escribirlo. Aquí el CAST va sobre la columna
+     * ({@code r.nombre::text}) y no sobre el parámetro, porque con una lista no hay dónde ponerlo.
      * <p>
-     * Por eso el parámetro es String y no RoleName: lo que viaja es el valor en español de la base
+     * Por eso los parámetros son String y no RoleName: lo que viaja es el valor en español de la base
      * —{@code RoleName.TEACHER.getDbValue()}, PROFESOR—, no el nombre de la constante Java.
+     * <p>
+     * <b>DISTINCT no es decorativo.</b> Al pasar de un rol a varios, quien tiene dos de los roles
+     * buscados casa dos veces en el JOIN y saldría duplicado en el selector. No es hipotético: el
+     * seed crea a Elena Vargas con ADMIN y PROFESOR a la vez.
      */
     @Query(value = """
-            SELECT u.*
+            SELECT DISTINCT u.*
             FROM usuario u
             JOIN usuario_rol ur ON ur.usuario_id = u.id
             JOIN rol r ON r.id = ur.rol_id
-            WHERE r.nombre = CAST(:roleName AS rol_nombre_enum)
+            WHERE r.nombre::text IN (:roleNames)
               AND u.activo = true
             """, nativeQuery = true)
-    List<User> findActiveByRole(@Param("roleName") String roleName);
+    List<User> findActiveByRoles(@Param("roleNames") Collection<String> roleNames);
 }
