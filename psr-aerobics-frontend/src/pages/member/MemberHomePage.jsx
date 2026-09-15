@@ -45,14 +45,10 @@ export default function MemberHomePage() {
   // Antes esta franja mostraba "asistencias de la semana" con un check falso cada día
   // (`isPaid` fijo en `false`) — no eran datos reales de asistencia, contradecía lo que la
   // persona sabía de sí misma (errores-12sep-front.md #5). `vista_perfil_persona` ya calcula
-  // `fn_dias_credito_disponible` — lo correcto es leer ese conteo, no volver a calcular
-  // asistencias en el frontend. Se asume que `GET /api/personas/{id}/perfil` lo expone camelCase
-  // (`diasCreditoDisponible`), igual que el resto de campos de `PersonResponse`
-  // (`documentNumber`, `birthDate`, `healthObservations`); no hay forma de confirmarlo sin probar
-  // contra el backend real desde acá, así que se agregan variantes de respaldo y, si ninguna
-  // llega, se oculta el bloque en vez de inventar un número.
-  const creditDays =
-    profile?.diasCreditoDisponible ?? profile?.dias_credito_disponible ?? profile?.creditDaysAvailable ?? null;
+  // `dias_credito_disponible` (columna) → `PersonProfileViewResponse.availableCreditDays` (record,
+  // psr-aerobics-backend) — confirmado leyendo el backend real, GET /api/personas/{id}/perfil ya
+  // lo expone con ese nombre, no hace falta pedir nada nuevo.
+  const creditDays = profile?.availableCreditDays ?? null;
 
   // `queue` (GET /api/cola/admin) solo responde para roles de personal — para un MIEMBRO puro
   // llega vacía en silencio (DataContext.refreshData descarta el 403 con Promise.allSettled).

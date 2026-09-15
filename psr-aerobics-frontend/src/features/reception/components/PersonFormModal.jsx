@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import BirthDateField from "../../../components/forms/BirthDateField";
+import { isValidDocumentNumber, isValidPhone } from "../../../utils/validation";
 
 export default function PersonFormModal({ mode = "add", person, onSave, onClose, error, saving = false }) {
   const [firstName, setFirstName] = useState(person?.firstName || "");
@@ -11,11 +12,21 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
   const [email, setEmail] = useState(person?.email || "");
   const [birthDate, setBirthDate] = useState(person?.birthDate || "");
 
+  // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
+  // El teléfono sigue siendo opcional en esta pantalla (igual que antes), pero si se escribe algo
+  // debe parecer un teléfono real, no solo "no estar vacío".
+  const documentoValid = isValidDocumentNumber(documentNumber);
+  const phoneValid = !phone.trim() || isValidPhone(phone);
+
   // Obligatorio para registros nuevos, no para editar uno existente (NOTAS-PARA-FRONTEND.md §5):
   // las personas registradas antes de este campo no lo tienen, y no hay por qué exigírselo recién
   // al editar cualquier otro dato suyo.
   const canSave =
-    firstName.trim() && lastName.trim() && documentNumber.trim() && (mode === "edit" || birthDate);
+    firstName.trim() &&
+    lastName.trim() &&
+    documentoValid &&
+    phoneValid &&
+    (mode === "edit" || birthDate);
 
   function handleSave() {
     if (!canSave) return;
@@ -88,6 +99,9 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
                 placeholder="1001234567"
                 className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
               />
+              {documentNumber && !documentoValid && (
+                <p className="text-amber-400 text-[11px] mt-1">Mínimo 6 dígitos.</p>
+              )}
             </div>
           </div>
 
@@ -100,6 +114,7 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
                 placeholder="300 123 4567"
                 className="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
               />
+              {phone && !phoneValid && <p className="text-amber-400 text-[11px] mt-1">Mínimo 10 dígitos.</p>}
             </div>
             <div>
               <label className="text-neutral-400 text-xs font-semibold">Correo Electrónico (opcional)</label>

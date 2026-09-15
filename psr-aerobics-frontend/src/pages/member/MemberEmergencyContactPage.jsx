@@ -4,6 +4,7 @@ import { Phone, User, MessageSquareText, Tags, CheckCircle2, ChevronLeft, Plus, 
 import Field from "../../components/forms/Field";
 import { useAuth } from "../../context/AuthContext";
 import { peopleService } from "../../services/peopleService";
+import { isValidEmergencyContactPhone } from "../../utils/validation";
 
 const CONDITION_CHIPS = [
   "Asma",
@@ -126,13 +127,13 @@ export default function MemberEmergencyContactPage({ onBack }) {
       ? freeText.trim()
       : [...selectedChips, otherText.trim()].filter(Boolean).join(", ");
 
-  // El backend solo exige que *algún* campo no sea nulo (`chk_contacto_emergencia_no_vacio`), lo
-  // que hoy deja crear un contacto sin ningún teléfono válido — inútil en una emergencia real, no
-  // hay a quién llamar (errores-12sep-compartido.md #2). El frontend exige acá un teléfono con
-  // formato razonable antes de dejar guardar, sin esperar a que el backend lo valide algún día.
-  const phoneDigits = newPhone.replace(/\D/g, "");
-  const phoneTooShort = newPhone.trim().length > 0 && phoneDigits.length < 7;
-  const phoneValid = phoneDigits.length >= 7 && phoneDigits.length <= 15;
+  // El teléfono ahora es obligatorio del lado del backend (NOTAS-PARA-FRONTEND.md ronda 5, §1.3 —
+  // "cambio rompedor, y ya está dentro"): `POST/PUT` de contactos de emergencia rechazan con 400 un
+  // cuerpo sin teléfono. La regla exacta es `^\+?[0-9 ]{7,20}$` — a propósito NO se usa el mínimo
+  // de 10 dígitos del resto de la app: el backend advierte explícitamente no hacerla más estricta
+  // que la suya, o se bloquean números que el servidor sí acepta (ej. un fijo de 7 dígitos).
+  const phoneTooShort = newPhone.trim().length > 0 && !isValidEmergencyContactPhone(newPhone);
+  const phoneValid = isValidEmergencyContactPhone(newPhone);
 
   async function handleAddContact() {
     const name = newName.trim();

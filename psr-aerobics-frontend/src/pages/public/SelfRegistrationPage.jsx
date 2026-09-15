@@ -5,6 +5,7 @@ import Field from "../../components/forms/Field";
 import BirthDateField from "../../components/forms/BirthDateField";
 import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
 import { peopleService } from "../../services/peopleService";
+import { isValidDocumentNumber, isValidPhone } from "../../utils/validation";
 
 const inputClass =
   "w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white text-base placeholder-neutral-600 outline-none focus:border-emerald-500";
@@ -28,11 +29,15 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
   // que hace recepción.
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
+  const documentoValid = isValidDocumentNumber(documento);
+  const phoneValid = isValidPhone(phone);
+
   const canSubmit =
     firstName.trim() &&
     lastName.trim() &&
-    documento.trim() &&
-    phone.trim() &&
+    documentoValid &&
+    phoneValid &&
     birthDate &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
@@ -161,6 +166,9 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
                   className={inputClass}
                 />
               </Field>
+              {documento && !documentoValid && (
+                <p className="text-amber-400 text-xs mt-1">Mínimo 6 dígitos.</p>
+              )}
             </div>
           </div>
 
@@ -174,6 +182,7 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
               className={inputClass}
             />
           </Field>
+          {phone && !phoneValid && <p className="text-amber-400 text-xs -mt-2">Mínimo 10 dígitos.</p>}
 
           <Field label="Correo electrónico (opcional)" icon={<Mail size={14} />}>
             <input

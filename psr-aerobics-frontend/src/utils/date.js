@@ -83,6 +83,14 @@ export function formatTimeOfDay(isoDateTimeStr) {
 // año a secas: alguien nacido hace 9 años y 11 meses no cumple 10, aunque el año ya diste 10)
 // (errores-nuevo-front.md, nota suelta "Cambiar Selector de fechas"). Comparación lexicográfica
 // de strings "YYYY-MM-DD" funciona igual que comparar fechas reales.
+/** "YYYY-MM-DD" en hora local — para `?desde=`/`?hasta=` de GET /api/sesiones (LocalDate). */
+export function toLocalDateString(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export function getMaxBirthDateForAge(years) {
   const today = new Date();
   const cutoff = new Date(today.getFullYear() - years, today.getMonth(), today.getDate());

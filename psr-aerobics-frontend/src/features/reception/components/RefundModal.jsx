@@ -42,7 +42,7 @@ export default function RefundModal({ person = {}, onConfirm, onClose, error = "
           </button>
         </div>
         <p className="text-neutral-500 text-sm mb-4">
-          {person.name || person.firstName || "Alumno"} · tiene abonado {formatCOP(max)}
+          {person.name || person.firstName || "Alumno"} · saldo a favor {formatCOP(max)}
         </p>
 
         <div className="space-y-3 mb-4">

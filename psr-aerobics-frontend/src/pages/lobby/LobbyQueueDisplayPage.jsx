@@ -16,39 +16,43 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    // 1. Carga inicial vía REST de producción
-    async function fetchInitialData() {
+    async function fetchWaiting() {
       try {
-        const [waitingData, prepaidData] = await Promise.allSettled([
-          queueService.getWaiting(),
-          queueService.getPrepaid(),
-        ]);
-
-        if (waitingData.status === "fulfilled") {
-          const list = Array.isArray(waitingData.value) ? waitingData.value : waitingData.value?.content || [];
-          setWaitingList(list);
-        }
-        if (prepaidData.status === "fulfilled") {
-          const list = Array.isArray(prepaidData.value) ? prepaidData.value : prepaidData.value?.content || [];
-          setPrepaidList(list);
-        }
+        const data = await queueService.getWaiting();
+        setWaitingList(Array.isArray(data) ? data : data?.content || []);
       } catch (err) {
-        console.error("Error al cargar datos iniciales de la cola desde la API:", err);
+        console.error("Error al refrescar la fila de espera desde la API:", err);
       }
     }
-    fetchInitialData();
+    async function fetchPrepaid() {
+      try {
+        const data = await queueService.getPrepaid();
+        setPrepaidList(Array.isArray(data) ? data : data?.content || []);
+      } catch (err) {
+        console.error("Error al refrescar la fila de prepagados desde la API:", err);
+      }
+    }
 
-    // 2. Conexión WebSocket STOMP directa en producción
+    // 1. Carga inicial vía REST de producción
+    fetchWaiting();
+    fetchPrepaid();
+
+    // 2. Conexión WebSocket STOMP directa en producción — el mensaje que llega por estos topics
+    // NO es la lista en sí, es solo la señal de que algo cambió (`QueueChangedEvent`:
+    // `{sessionId, type}`), a propósito según el comentario del backend ("el cliente recibe la
+    // señal y relee el endpoint REST"). Antes se trataba ese payload como si fuera la lista
+    // (`Array.isArray(data) ? data : data?.content || []`, que siempre caía en `[]` porque nunca
+    // es ninguna de las dos cosas), así que cada evento VACIABA las listas en vez de
+    // actualizarlas — se corrige refetcheando por REST en cada señal, igual que
+    // `DataContext.jsx` (errores-13sep-front.md #1).
     const client = createQueueSocketClient({
-      onEsperaQueue: (data) => {
+      onEsperaQueue: () => {
         setIsConnected(true);
-        const list = Array.isArray(data) ? data : data?.content || [];
-        setWaitingList(list);
+        fetchWaiting();
       },
-      onPrepaidQueue: (data) => {
+      onPrepaidQueue: () => {
         setIsConnected(true);
-        const list = Array.isArray(data) ? data : data?.content || [];
-        setPrepaidList(list);
+        fetchPrepaid();
       },
       onError: () => {
         setIsConnected(false);

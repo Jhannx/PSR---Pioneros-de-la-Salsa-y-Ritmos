@@ -17,19 +17,24 @@ export default function ConfirmEmailChangePage() {
 
   useEffect(() => {
     if (!token) return;
-    let cancelled = false;
-    peopleService.confirmEmailChange(token)
+    // AbortController y no solo el flag `cancelled` de antes: React StrictMode monta este efecto,
+    // lo limpia y lo vuelve a montar en desarrollo, y sin esto la limpieza solo ignoraba la
+    // respuesta de la primera petición sin cancelarla — las dos llegaban igual al backend con el
+    // mismo token de un solo uso. La segunda encontraba el token ya borrado por la primera y
+    // reventaba con un 500 crudo en vez de un error legible (errores-13sep-front.md #2).
+    const controller = new AbortController();
+    peopleService.confirmEmailChange(token, { signal: controller.signal })
       .then(() => {
-        if (!cancelled) setStatus("done");
+        setStatus("done");
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (err.name === "AbortError") return; // cancelada a propósito, no es un error real
         // 400 típico: el enlace ya expiró (72h) o ya se usó. El backend manda mensaje legible.
         setErrorMessage(err.data?.message || err.message || "El enlace no es válido o ya expiró.");
         setStatus("error");
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [token]);
 

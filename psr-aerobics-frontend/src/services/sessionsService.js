@@ -1,12 +1,23 @@
 import { apiClient } from "./apiClient";
 
 export const sessionsService = {
-  getSessions: async (desde, hasta) => {
+  // GET /api/sesiones SIN parámetros es un histórico completo, ordenado por fecha DESCENDENTE y
+  // paginado de 20 en 20 (RESPUESTA-NOTAS-FINAL.md #2) — desde que las sesiones se generan 7 días
+  // por adelantado, la página 0 se llena de sesiones futuras y la de HOY cae a la página 2, dando
+  // la impresión de que se "borró" sin que nada se haya borrado. `desde`/`hasta` van siempre juntos
+  // (o ninguno) — `size` grande de respaldo por si el rango igual pagina.
+  getSessions: async (desde, hasta, size = 200) => {
     const params = new URLSearchParams();
     if (desde) params.append("desde", desde);
     if (hasta) params.append("hasta", hasta);
+    if (size) params.append("size", size);
     const queryString = params.toString();
     return await apiClient.get(`/api/sesiones${queryString ? `?${queryString}` : ""}`);
+  },
+
+  // Sesiones de un solo día — no pagina, no puede esconder ninguna (RESPUESTA-NOTAS-FINAL.md #2).
+  getSessionsByDate: async (fecha) => {
+    return await apiClient.get(`/api/sesiones/fecha/${fecha}`);
   },
 
   getSessionSummary: async (id) => {

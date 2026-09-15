@@ -19,8 +19,11 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setErrorMessage("");
     try {
-      // El backend responde 200 exista o no el correo, así que "sent" siempre
-      // significa que la petición se procesó, no que la cuenta existe.
+      // Decisión de negocio explícita del backend (NOTAS-PARA-FRONTEND.md ronda 5, §2.4): este
+      // endpoint YA revela si el correo existe — 404 con mensaje si no, 200 si sí. Antes el
+      // backend respondía 200 en ambos casos a propósito (para no ser un enumerador de cuentas);
+      // eso cambió aposta para este público, así que "sent" ahora sí significa "el correo existe
+      // y se le mandó el enlace" — el 404 lo maneja el catch de abajo como cualquier otro error.
       await authService.forgotPassword(email.trim());
       setSent(true);
     } catch (err) {
@@ -95,7 +98,7 @@ export default function ForgotPasswordPage() {
             <div>
               <h1 className="text-lg font-bold text-white">Revisa tu correo</h1>
               <p className="text-neutral-400 text-sm mt-1.5">
-                Si el correo existe en nuestro sistema, se envió un enlace de recuperación.
+                Se envió un enlace de recuperación a tu correo.
               </p>
             </div>
           </div>
