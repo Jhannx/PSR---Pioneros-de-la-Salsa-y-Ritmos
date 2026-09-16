@@ -9,10 +9,13 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -30,6 +33,8 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/horarios")
+// Consultar el horario lo necesita todo el personal; modificarlo es administración.
+@PreAuthorize(Authorities.STAFF)
 @RequiredArgsConstructor
 @Validated
 public class ScheduleController {
@@ -67,6 +72,7 @@ public class ScheduleController {
      * Registra un nuevo horario semanal.
      */
     @PostMapping
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<ScheduleResponse> create(
             @Valid @RequestBody ScheduleRequest request) {
 
@@ -77,6 +83,7 @@ public class ScheduleController {
      * Actualiza un horario existente.
      */
     @PutMapping("/{id}")
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<ScheduleResponse> update(
             @PathVariable @Positive(message = "El ID del horario debe ser positivo") Integer id,
             @Valid @RequestBody ScheduleRequest request) {
@@ -85,9 +92,40 @@ public class ScheduleController {
     }
 
     /**
+     * Reactiva un horario desactivado: vuelve a generar sesiones por recurrencia
+     * (fn_obtener_o_crear_sesion_del_momento solo mira los horarios con activo = true).
+     * <p>
+     * Sin este endpoint, el DELETE de abajo era un viaje de ida: apagaba el horario y no había forma
+     * de encenderlo otra vez desde la API. Mismo patrón que /api/usuarios/{id}/activar.
+     */
+    @PatchMapping("/{id}/activar")
+    @PreAuthorize(Authorities.ADMIN)
+    public ResponseEntity<ScheduleResponse> activate(
+            @PathVariable @Positive(message = "El ID del horario debe ser positivo") Integer id) {
+
+        return ResponseEntity.ok(scheduleService.setActive(id, true));
+    }
+
+    /**
+     * Desactiva un horario. Hace lo mismo que el DELETE de abajo, pero devuelve el horario con su
+     * estado nuevo en vez de un 204 mudo, y se llama como lo que realmente hace.
+     */
+    @PatchMapping("/{id}/desactivar")
+    @PreAuthorize(Authorities.ADMIN)
+    public ResponseEntity<ScheduleResponse> deactivate(
+            @PathVariable @Positive(message = "El ID del horario debe ser positivo") Integer id) {
+
+        return ResponseEntity.ok(scheduleService.setActive(id, false));
+    }
+
+    /**
      * Desactiva un horario (borrado lógico).
+     * <p>
+     * Se mantiene por compatibilidad con el frontend que ya lo llama; para nuevas pantallas es
+     * preferible el PATCH /desactivar, que dice lo que hace y devuelve el estado resultante.
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<Void> delete(
             @PathVariable @Positive(message = "El ID del horario debe ser positivo") Integer id) {
 

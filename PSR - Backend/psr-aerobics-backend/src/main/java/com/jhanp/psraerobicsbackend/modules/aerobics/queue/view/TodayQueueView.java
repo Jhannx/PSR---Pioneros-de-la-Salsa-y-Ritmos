@@ -1,5 +1,6 @@
 package com.jhanp.psraerobicsbackend.modules.aerobics.queue.view;
 
+import com.jhanp.psraerobicsbackend.modules.aerobics.checkin.enums.CheckinMethod;
 import jakarta.persistence.*;
 import lombok.Getter;
 import org.hibernate.annotations.Immutable;
@@ -32,8 +33,22 @@ public class TodayQueueView {
     @Column(name = "hora_llegada")
     private OffsetDateTime arrivalTime;
 
-    @Column(name = "metodo_checkin")
-    private String checkinMethod;
+    /**
+     * CheckinMethod y no String, y de eso depende que el check-in responda.
+     * <p>
+     * Declarado como String, esta columna llegaba con el valor crudo de la base ("DOCUMENTO") y
+     * MapStruct, al mapear hacia CheckinResponse y TodayQueueViewResponse —que declaran el enum—,
+     * generaba un {@code Enum.valueOf(CheckinMethod.class, "DOCUMENTO")}. Como las constantes están
+     * en inglés (DOCUMENT), reventaba con "No enum constant ...CheckinMethod.DOCUMENTO".
+     * <p>
+     * El detalle que lo hacía difícil de ver: con QR funcionaba, porque ahí el nombre de la constante
+     * y el valor de la base coinciden. Solo fallaba con DOCUMENTO y MANUAL.
+     * <p>
+     * Con el tipo correcto entra CheckinMethodConverter, que sabe traducir, y MapStruct pasa a mapear
+     * enum → enum. El converter es de JPA: sobre un String no se aplica nunca.
+     */
+    @Column(name = "metodo_checkin", columnDefinition = "metodo_checkin_enum")
+    private CheckinMethod checkinMethod;
 
     @Column(name = "posicion")
     private Long position;

@@ -1,13 +1,20 @@
 package com.jhanp.psraerobicsbackend.modules.aerobics.report.controller;
 
 import com.jhanp.psraerobicsbackend.modules.aerobics.report.dto.response.DailyRevenueViewResponse;
+import com.jhanp.psraerobicsbackend.modules.aerobics.report.dto.response.DashboardResponse;
 import com.jhanp.psraerobicsbackend.modules.aerobics.report.dto.response.SessionRevenueViewResponse;
+import com.jhanp.psraerobicsbackend.modules.person.dto.response.PersonBalanceViewResponse;
 import com.jhanp.psraerobicsbackend.modules.aerobics.report.service.interfaces.IReportService;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,11 +30,49 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/reportes")
+// Recaudo: lo ve quien cobra. El profesor queda fuera, no tiene por qué ver el dinero.
+@PreAuthorize(Authorities.DESK)
 @RequiredArgsConstructor
 @Validated
 public class ReportController {
 
     private final IReportService reportService;
+
+    /**
+     * Saldo de todas las personas activas, de deudor a acreedor y paginado.
+     * <p>
+     * Es el listado de la pestaña de cuentas. Existe para no resolverlo desde el front pidiendo el
+     * saldo de una en una: eso serían tantas peticiones como personas en la página.
+     */
+    @GetMapping("/saldos-personas")
+    public ResponseEntity<Page<PersonBalanceViewResponse>> getPersonBalances(
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ResponseEntity.ok(reportService.getPersonBalances(pageable));
+    }
+
+    /**
+     * Métricas del dashboard, ya calculadas.
+     * <p>
+     * Los ingresos que devuelve son DEVENGADOS: se atribuyen a la fecha de la clase que se dictó, no a
+     * la fecha en que entró el dinero. Es distinto de /recaudo-diario, que responde "cuánto entró hoy
+     * en caja" — con esa otra métrica, un abono adelantado el lunes para la clase del miércoles haría
+     * que el miércoles pareciera flojo.
+     *
+     * @param fecha del día que se quiere ver; por defecto, hoy
+     * @param desde inicio de la ventana de los promedios; por defecto, 30 días atrás
+     * @param hasta fin de la ventana; por defecto, el mismo día consultado
+     */
+    @GetMapping("/dashboard")
+    public ResponseEntity<DashboardResponse> getDashboard(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta) {
+
+        return ResponseEntity.ok(reportService.getDashboard(fecha, desde, hasta));
+    }
 
     /**
      * Recaudo por día puntual y sesión.

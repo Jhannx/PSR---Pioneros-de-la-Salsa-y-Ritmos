@@ -20,13 +20,14 @@ export default function PeopleListPage() {
   const [pageInfo, setPageInfo] = useState({ totalPages: 0, totalElements: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // Conteo real, independiente del filtro de búsqueda (errores-nuevo-front.md #2): `pageInfo`
-  // sale de la misma respuesta paginada que la búsqueda, así que al filtrar refleja los
-  // resultados filtrados, no el total. Este se pide aparte, sin `buscar`, y se refresca solo
-  // tras altas/bajas — no en cada tecleo del buscador.
+  // Conteo real, independiente del filtro de búsqueda (errores-nuevo-front.md #2): se pide aparte,
+  // sin `buscar`, y se refresca solo tras altas/bajas — no en cada tecleo del buscador.
   const [activeTotal, setActiveTotal] = useState(null);
+  const [registeredTotal, setRegisteredTotal] = useState(null);
 
   const [formModal, setFormModal] = useState(null); // null | { mode: 'add' } | { mode: 'edit', person }
+  const [modalError, setModalError] = useState("");
+  const [savingPerson, setSavingPerson] = useState(false);
   const [confirmDeactivateId, setConfirmDeactivateId] = useState(null);
   const [hardDeleteTarget, setHardDeleteTarget] = useState(null);
 
@@ -72,10 +73,32 @@ export default function PeopleListPage() {
     return () => clearTimeout(timer);
   }, [loadPeople]);
 
+  // `GET /api/personas` no acepta ningún filtro de `activo` (openapi.md: solo admite `buscar` y
+  // `pageable`) — así que la única forma de un conteo de "activos" real es traer todas las
+  // páginas y contarlas acá, no hay atajo del backend todavía. Antes se pedía `size=1` y se
+  // tomaba `totalElements` tal cual llamándolo "activos": ese número es el total de personas
+  // (activas + inactivas juntas, sin distinguir), así que desactivar a alguien nunca lo movía —
+  // el conteo "seguía contando como activo" después de desactivar (errores-12sep-front.md #1 y
+  // #4). Tope de 25 páginas (5000 personas) como salvaguarda razonable para el tamaño de esta
+  // academia; si el directorio crece más que eso, esto sí necesita un endpoint de conteo real.
   const loadActiveTotal = useCallback(async () => {
+    const PAGE_SIZE = 200;
+    const MAX_PAGES = 25;
     try {
-      const response = await peopleService.getAll({ page: 0, size: 1 });
-      setActiveTotal(response?.totalElements ?? 0);
+      let pageIndex = 0;
+      let total = 0;
+      let active = 0;
+      let totalPages = 1;
+      do {
+        const response = await peopleService.getAll({ page: pageIndex, size: PAGE_SIZE });
+        const content = Array.isArray(response?.content) ? response.content : [];
+        active += content.filter((p) => p.active !== false).length;
+        total = response?.totalElements ?? total + content.length;
+        totalPages = response?.totalPages ?? 1;
+        pageIndex += 1;
+      } while (pageIndex < totalPages && pageIndex < MAX_PAGES);
+      setActiveTotal(active);
+      setRegisteredTotal(total);
     } catch {
       // No es crítico: si falla, el encabezado simplemente no muestra el conteo.
     }
@@ -91,6 +114,8 @@ export default function PeopleListPage() {
   }
 
   async function handleSavePerson(data) {
+    setSavingPerson(true);
+    setModalError("");
     try {
       if (formModal?.mode === "edit") {
         await peopleService.update(formModal.person.id, data);
@@ -101,7 +126,12 @@ export default function PeopleListPage() {
       await loadPeople();
       await loadActiveTotal();
     } catch (err) {
-      setError(err.data?.message || err.message || "No fue posible guardar la persona.");
+      // Se muestra DENTRO del modal (`modalError`), no en `error` de la página: ese banner queda
+      // detrás del modal (z-50, fondo oscurecido) y era invisible — un 409 de documento/teléfono
+      // duplicado no se veía nunca, tanto en alta como en edición (errores-12sep-front.md #9).
+      setModalError(err.data?.message || err.message || "No fue posible guardar la persona.");
+    } finally {
+      setSavingPerson(false);
     }
   }
 
@@ -148,17 +178,25 @@ export default function PeopleListPage() {
         {/* Encabezado compacto */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-3">
           <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">Personas Registradas</h1>
+            <h1 className="text-xl font-bold text-white tracking-tight">Personas</h1>
             <p className="text-neutral-400 text-xs mt-0.5">
               Directorio general de alumnos y miembros
-              {activeTotal !== null && ` (${activeTotal} usuarios activos)`}
+              {/* Antes decía "(N usuarios activos)" usando el total de registrados (activos +
+                  inactivos, sin distinguir) — nombrado "activos" pero sin serlo, y por eso no
+                  bajaba al desactivar a alguien (errores-12sep-front.md #1 y #4). Ahora se
+                  muestran los dos números reales por separado. */}
+              {registeredTotal !== null && ` · ${registeredTotal} registrados`}
+              {activeTotal !== null && ` · ${activeTotal} activos`}
               {isReadOnly && " · Solo lectura"}
             </p>
           </div>
           {!isReadOnly && (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setFormModal({ mode: "add" })}
+                onClick={() => {
+                  setModalError("");
+                  setFormModal({ mode: "add" });
+                }}
                 className="flex items-center gap-1.5 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-colors shadow-md shadow-emerald-500/20"
               >
                 <UserPlus size={14} /> Agregar Persona
@@ -198,7 +236,10 @@ export default function PeopleListPage() {
                   readOnly={isReadOnly}
                   canHardDelete={isAdmin}
                   isDeactivating={confirmDeactivateId === person.id}
-                  onEdit={() => setFormModal({ mode: "edit", person })}
+                  onEdit={() => {
+                    setModalError("");
+                    setFormModal({ mode: "edit", person });
+                  }}
                   onDeactivateRequest={() => setConfirmDeactivateId(person.id)}
                   onDeactivateConfirm={handleConfirmDeactivate}
                   onDeactivateCancel={() => setConfirmDeactivateId(null)}
@@ -225,6 +266,8 @@ export default function PeopleListPage() {
           person={formModal.person}
           onSave={handleSavePerson}
           onClose={() => setFormModal(null)}
+          error={modalError}
+          saving={savingPerson}
         />
       )}
 

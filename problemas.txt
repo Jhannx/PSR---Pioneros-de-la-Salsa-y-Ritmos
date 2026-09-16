@@ -1,0 +1,109 @@
+Demora mucho al hacer querys, no puedo probar postman por permisos
+Al eliminar definitivamente pide confirmacion "undefined undefined" no un mensaje real
+
+Al crear sesion de clase JSON mal formado:
+apiClient.js:34 
+ POST http://localhost:8080/api/sesiones 400 (Bad Request)
+DataContext.jsx:152 Error al crear sesión de clase: ApiError: El cuerpo de la solicitud JSON es inválido o está mal formado
+    at request (apiClient.js:54:11)
+    at async Object.createSession (sessionsService.js:18:12)
+    at async createSession (DataContext.jsx:148:23)
+    at async handleCreateSession (SessionsPage.jsx:58:7)
+
+horarios recurrentes pide eliminar pero se termina desactivando, no hay forma de activar, por lo que no se usa bien el active/unactive y el delete
+
+Auditoria de actividad:
+apiClient.js:34  GET http://localhost:8080/api/auditoria/historial-cambios?desde=2026-09-06T00%3A00%3A00-05%3A00&hasta=2026-09-06T23%3A59%3A00-05%3A00&page=0&size=25 500 (Internal Server Error)
+(anónimo) @ apiClient.js:34
+(anónimo) @ apiClient.js:61
+(anónimo) @ reportsService.js:10
+(anónimo) @ AuditPage.jsx:38
+(anónimo) @ AuditPage.jsx:52
+react_stack_bottom_frame @ react-dom_client.js?v=dc4a09a0:12902
+runWithFiberInDEV @ react-dom_client.js?v=dc4a09a0:851
+commitHookEffectListMount @ react-dom_client.js?v=dc4a09a0:6617
+commitHookPassiveMountEffects @ react-dom_client.js?v=dc4a09a0:6652
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7618
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7617
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7672
+recursivelyTraversePassiveMountEffects @ react-dom_client.js?v=dc4a09a0:7606
+commitPassiveMountOnFiber @ react-dom_client.js?v=dc4a09a0:7627
+flushPassiveEffects @ react-dom_client.js?v=dc4a09a0:8808
+flushPendingEffects @ react-dom_client.js?v=dc4a09a0:8769
+performSyncWorkOnRoot @ react-dom_client.js?v=dc4a09a0:9064
+flushSyncWorkAcrossRoots_impl @ react-dom_client.js?v=dc4a09a0:8984
+flushSpawnedWork @ react-dom_client.js?v=dc4a09a0:8752
+commitRoot @ react-dom_client.js?v=dc4a09a0:8585
+commitRootWhenReady @ react-dom_client.js?v=dc4a09a0:8079
+performWorkOnRoot @ react-dom_client.js?v=dc4a09a0:8051
+performWorkOnRootViaSchedulerTask @ react-dom_client.js?v=dc4a09a0:9059
+performWorkUntilDeadline @ react-dom_client.js?v=dc4a09a0:36
+apiClient.js:34  GET http://localhost:8080/api/auditoria/historial-cambios?desde=2026-09-06T00%3A00%3A00-05%3A00&hasta=2026-09-06T23%3A59%3A00-05%3A00&page=0&size=25 500 (Internal Server Error)
+Lo cual, tengo un problema de como está formado porque por defecto da un rango de fechas, cuando se quiere es que por defecto muestre todas paginadas por 10, y exista la opcion de rango pero como opcional, sin
+
+
+Como tal me sigue devolviendo: VM226:2 Uncaught TypeError: Cannot read properties of undefined (reading 'startTime')
+    at et.reportAllChanges (<anonymous>:2:19429)
+    at <anonymous>:2:13070
+    at <anonymous>:2:331
+    at d (<anonymous>:2:6141)
+    at <anonymous>:2:6326
+    at <anonymous>:2:2895
+    at n.timeout (<anonymous>:2:5652) en general
+
+Al intentar desactivar un metodo de pago: apiClient.js:34  PATCH http://localhost:8080/api/metodos-pago/3/desactivar 500 (Internal Server Error)
+Noto que no existe forma de eliminar un metodo como tal
+
+Para contacto de emergencia me permite crearlo, pero no se presenta como una lista de contactos de emergencia, se limita a 1a1 y es incorrecto, necesito tener una lista crud de contactos
+apiClient.js:34  GET http://localhost:8080/api/personas/23/contacto-emergencia 404 (Not Found) al recargarlo 
+
+Correo no me permite editarlo sin ninguna razon, ni siendo admin, es incorrecto esto, todo usuario puede editar su correo mientras la base de datos mantenga la seguridad de q sea unique
+
+
+Soy multirol y no veo una pagina que me permita decidir desde que rol deseo ingresar, esto es importante cuando soy un miembro y un administrador a la vez, aunque tengo miles de opciones, no puedo ingresar a probar como miembro por ello
+Por cierto, siendo multirol se duplican las sections en el sidebar hay doble configuracion, audtioria...etc, es decir, los permisos de profesor se duplicaron con los de admin, precisamente por eso se debe de manejar esta pagina donde decido con que rol ingreso al sistema y me permita cambiar de rol sin tener que desloguearme
+
+Tambien noto que en las urls sigue marcandose /member por estar en contacto de emergencia o en mi perfil aunque esté logueado como admin, no digo que necesariamente sea malo, pero si existe correcion de esto se debe de aplicar
+

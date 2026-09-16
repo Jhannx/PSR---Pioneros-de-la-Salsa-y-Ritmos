@@ -1,6 +1,8 @@
 package com.jhanp.psraerobicsbackend.modules.person.repository;
 
 import com.jhanp.psraerobicsbackend.modules.person.view.PersonBalanceView;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.Repository;
 
 import java.util.List;
@@ -18,4 +20,6 @@ public interface PersonBalanceViewRepository extends Repository<PersonBalanceVie
      * Saldos de menor a mayor: los deudores primero. La vista solo incluye personas activas.
      */
     List<PersonBalanceView> findAllByOrderByBalanceAsc();
+
+    Page<PersonBalanceView> findAllByOrderByBalanceAsc(Pageable pageable);
 }

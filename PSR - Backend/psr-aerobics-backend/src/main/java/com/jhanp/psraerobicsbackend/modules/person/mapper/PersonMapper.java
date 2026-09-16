@@ -15,19 +15,26 @@ import org.mapstruct.MappingTarget;
 public interface PersonMapper {
 
     /**
-     * userId no sale de Person (la FK vive en usuario): lo pasa el service, que acaba de crear la
-     * cuenta en la misma transacción, o lo resuelve al leer.
+     * userId y email no salen de Person (viven en usuario): los pasa el service, que acaba de crear la
+     * cuenta en la misma transacción, o los resuelve al leer.
      */
     @Mapping(source = "person.name", target = "firstName")
     @Mapping(source = "person.registrationSource", target = "source")
     @Mapping(source = "userId", target = "userId")
-    PersonResponse toResponse(Person person, Integer userId);
+    @Mapping(source = "email", target = "email")
+    PersonResponse toResponse(Person person, Integer userId, String email);
 
+    /**
+     * healthObservations se ignora a propósito: no está en PersonUpdateRequest y se escribe por su
+     * propio endpoint. Si algún día se añadiera al request, quitar esta línea — mientras tanto evita
+     * que MapStruct lo ponga a null en cada edición.
+     */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "registeredAt", ignore = true)
     @Mapping(target = "active", ignore = true)
     @Mapping(target = "registrationSource", ignore = true)
-    @Mapping(target = "emergencyContact", ignore = true)
+    @Mapping(target = "emergencyContacts", ignore = true)
+    @Mapping(target = "healthObservations", ignore = true)
     @Mapping(source = "firstName", target = "name")
     void updateEntity(PersonUpdateRequest request, @MappingTarget Person person);
 }

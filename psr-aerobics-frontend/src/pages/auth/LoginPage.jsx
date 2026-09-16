@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LogIn, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { needsRoleSelectionFor } from "../../context/RoleContext";
 
 const ACADEMY_NAME = "PSR Aeróbicos";
 
@@ -43,7 +44,18 @@ export default function LoginPage() {
       const result = await login(identifier, password);
       setLoading(false);
       if (result.success) {
-        navigate(from ? `${from.pathname}${from.search || ""}` : "/", { replace: true });
+        // El selector de rol tiene prioridad sobre "volver a la última ruta visitada": antes,
+        // con `from` presente (ej. una cuenta multirol que perdió la sesión estando en
+        // /admin/roles), se navegaba directo ahí sin pasar nunca por `needsRoleSelection` — el
+        // selector solo se evaluaba en `RoleRedirect`, montado en "/", que este `from` se saltaba
+        // por completo (errores-12sep-front.md #6). Se calcula acá con el `user` recién logueado
+        // en vez de leer `useRole()`, que todavía no re-renderizó con la cuenta nueva en este
+        // mismo tick.
+        if (needsRoleSelectionFor(result.user)) {
+          navigate("/seleccionar-rol", { replace: true });
+        } else {
+          navigate(from ? `${from.pathname}${from.search || ""}` : "/", { replace: true });
+        }
       } else if (result.code === LOCKED_ACCOUNT_CODE) {
         setError(result.error || LOCKED_ACCOUNT_MESSAGE);
       } else {

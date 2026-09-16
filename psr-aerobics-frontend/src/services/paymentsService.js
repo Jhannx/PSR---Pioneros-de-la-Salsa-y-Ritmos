@@ -35,9 +35,20 @@ export const paymentsService = {
     return await apiClient.post(`/api/movimientos/${movementId}/vuelto`);
   },
 
+  // Reembolsa contra UN movimiento puntual — sigue existiendo para cuando de verdad se quiera
+  // apuntar a un abono concreto. Para "devolverle X a esta persona" en general, usar
+  // `refundPerson` de abajo (RESPUESTA-NOTAS-FINAL.md #1).
   processRefund: async (movementId, data) => {
     // RefundRequest: { paymentMethodId, amount, note }
     return await apiClient.post(`/api/movimientos/${movementId}/reembolso`, data);
+  },
+
+  // Reembolsa un monto total sin importar en cuántos abonos esté repartido — el backend decide el
+  // reparto (FIFO, todo o nada) en una sola transacción. Reemplaza el parche que hacía esto mismo
+  // desde el front, encadenando una llamada por movimiento (RESPUESTA-NOTAS-FINAL.md #1).
+  refundPerson: async (personId, data) => {
+    // { amount, paymentMethodId, note? } → { personId, totalRefunded, allocations: [...] }
+    return await apiClient.post(`/api/personas/${personId}/reembolso`, data);
   },
 
   getPricing: async () => {

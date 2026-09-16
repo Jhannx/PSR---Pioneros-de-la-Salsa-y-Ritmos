@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getMaxBirthDateForAge } from "../../utils/date";
 
 // Reemplaza el <input type="date"> nativo para fecha de nacimiento (errores-nuevo-front.md, nota
@@ -13,6 +13,11 @@ const MONTHS = [
 
 function daysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
+}
+
+function parseValue(value) {
+  const [y, m, d] = value ? value.split("-").map(Number) : [null, null, null];
+  return { y: y || null, m: m || null, d: d || null };
 }
 
 // `value`/`onChange` usan el mismo formato ISO "YYYY-MM-DD" (o "") que ya manejan los tres
@@ -38,7 +43,23 @@ export default function BirthDateField({
     return list;
   }, [cutoffYear, firstYear]);
 
-  const [y, m, d] = value ? value.split("-").map(Number) : [null, null, null];
+  // Selección local, independiente de si ya se completaron los tres campos (errores-12sep-front.md
+  // #8): antes, `value`/`onChange` eran la única fuente de verdad, y `onChange` solo mandaba algo
+  // distinto de "" cuando año, mes y día ya estaban los tres presentes — mientras faltara uno,
+  // cada elección disparaba `onChange("")`, lo que volvía a dejar `value` vacío y los <select> ya
+  // elegidos se mostraban de nuevo sin seleccionar, como si el clic no hubiera pasado. Ahora cada
+  // <select> refleja el estado local de inmediato; `onChange` sigue mandando "" hacia afuera hasta
+  // que la fecha esté completa, exactamente igual que antes para quien consume este campo.
+  const [local, setLocal] = useState(() => parseValue(value));
+  const lastEmittedRef = useRef(value);
+
+  useEffect(() => {
+    if (value === lastEmittedRef.current) return; // el cambio vino de acá abajo, ya está reflejado
+    lastEmittedRef.current = value;
+    setLocal(parseValue(value));
+  }, [value]);
+
+  const { y, m, d } = local;
 
   const maxMonth = y === cutoffYear ? cutoffMonth : 12;
   const months = useMemo(
@@ -51,23 +72,33 @@ export default function BirthDateField({
   const days = useMemo(() => Array.from({ length: maxDay }, (_, i) => i + 1), [maxDay]);
 
   function emit(nextYear, nextMonth, nextDay) {
-    if (!nextYear || !nextMonth || !nextDay) {
+    let clampedMonth = nextMonth;
+    if (nextYear === cutoffYear && nextMonth && nextMonth > cutoffMonth) {
+      clampedMonth = cutoffMonth;
+    }
+    let clampedDay = nextDay;
+    if (nextYear && clampedMonth && nextDay) {
+      const dayLimit =
+        nextYear === cutoffYear && clampedMonth === cutoffMonth ? cutoffDay : daysInMonth(nextYear, clampedMonth);
+      clampedDay = Math.min(nextDay, dayLimit);
+    }
+
+    setLocal({ y: nextYear || null, m: clampedMonth || null, d: clampedDay || null });
+
+    if (!nextYear || !clampedMonth || !clampedDay) {
+      lastEmittedRef.current = "";
       onChange("");
       return;
     }
-    const clampedMonth = nextYear === cutoffYear ? Math.min(nextMonth, cutoffMonth) : nextMonth;
-    const dayLimit =
-      nextYear === cutoffYear && clampedMonth === cutoffMonth
-        ? cutoffDay
-        : daysInMonth(nextYear, clampedMonth);
-    const clampedDay = Math.min(nextDay, dayLimit);
     const pad = (n) => String(n).padStart(2, "0");
-    onChange(`${nextYear}-${pad(clampedMonth)}-${pad(clampedDay)}`);
+    const iso = `${nextYear}-${pad(clampedMonth)}-${pad(clampedDay)}`;
+    lastEmittedRef.current = iso;
+    onChange(iso);
   }
 
   return (
     <div className={`grid grid-cols-3 gap-2 ${className}`}>
-      <select value={d || ""} onChange={(e) => emit(y, m, Number(e.target.value))} className={selectClassName}>
+      <select value={d || ""} onChange={(e) => emit(y, m, Number(e.target.value) || null)} className={selectClassName}>
         <option value="">Día</option>
         {days.map((day) => (
           <option key={day} value={day}>
@@ -75,7 +106,7 @@ export default function BirthDateField({
           </option>
         ))}
       </select>
-      <select value={m || ""} onChange={(e) => emit(y, Number(e.target.value), d || 1)} className={selectClassName}>
+      <select value={m || ""} onChange={(e) => emit(y, Number(e.target.value) || null, d)} className={selectClassName}>
         <option value="">Mes</option>
         {months.map((month) => (
           <option key={month.value} value={month.value}>
@@ -83,7 +114,7 @@ export default function BirthDateField({
           </option>
         ))}
       </select>
-      <select value={y || ""} onChange={(e) => emit(Number(e.target.value), m || 1, d || 1)} className={selectClassName}>
+      <select value={y || ""} onChange={(e) => emit(Number(e.target.value) || null, m, d)} className={selectClassName}>
         <option value="">Año</option>
         {years.map((year) => (
           <option key={year} value={year}>

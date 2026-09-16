@@ -8,9 +8,8 @@ const inputClass =
   "w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors";
 
 export default function SessionsPage() {
-  const { sessions, createSession, cancelSession, people } = useMockData();
+  const { sessions, createSession, cancelSession, reassignSessionTeacher, people } = useMockData();
   const [teachersList, setTeachersList] = useState([]);
-  const [teachersLoaded, setTeachersLoaded] = useState(false);
   const [formError, setFormError] = useState("");
   const [cancelError, setCancelError] = useState("");
 
@@ -23,15 +22,22 @@ export default function SessionsPage() {
   const [endTime, setEndTime] = useState("07:00");
   const [teacherUserId, setTeacherUserId] = useState("");
 
+  // Ahora los profesores asignables incluyen ADMIN, no solo PROFESOR
+  // (NOTAS-PARA-FRONTEND.md ronda 5, §0.2) — sin cambios de nuestro lado, el endpoint ya devuelve
+  // la lista correcta. Se carga al montar, no solo al abrir el modal de crear: la mayoría de las
+  // sesiones ahora nacen sin profesor (generadas por adelantado desde los horarios, §0.6) y cada
+  // tarjeta necesita poder asignar uno sin pasar por "Crear Sesión Manual".
+  const [reassigningId, setReassigningId] = useState(null);
+  const [reassignError, setReassignError] = useState("");
+  const [reassignSaving, setReassignSaving] = useState(false);
+
   useEffect(() => {
-    if (!showAddModal || teachersLoaded) return;
     let cancelled = false;
     async function loadTeachers() {
       try {
         const result = await userService.getTeachers();
         if (!cancelled && Array.isArray(result)) {
           setTeachersList(result);
-          setTeachersLoaded(true);
         }
       } catch (err) {
         console.warn("No se cargó lista de profesores desde la API:", err);
@@ -41,7 +47,21 @@ export default function SessionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [showAddModal, teachersLoaded]);
+  }, []);
+
+  async function handleReassignTeacher(sessionId, newTeacherUserId) {
+    if (!newTeacherUserId) return;
+    setReassignSaving(true);
+    setReassignError("");
+    try {
+      await reassignSessionTeacher(sessionId, Number(newTeacherUserId));
+      setReassigningId(null);
+    } catch (err) {
+      setReassignError(err.data?.message || err.message || "No se pudo asignar el profesor.");
+    } finally {
+      setReassignSaving(false);
+    }
+  }
 
   function teacherName(teacherUserId) {
     const teacher = teachersList.find((t) => t.userId === teacherUserId || t.id === teacherUserId);
@@ -85,6 +105,15 @@ export default function SessionsPage() {
     }
   }
 
+  // Sin filtro, esta pantalla mostraba TODAS las sesiones que devuelve el backend de una — y desde
+  // que las sesiones se generan por adelantado (7 días, más las canceladas que se van
+  // acumulando), eso deja de ser una lista manejable (problemas-finales, 13-sep: "no tiene ningún
+  // tipo de filtro"). Front-only: ocultar canceladas por defecto, con un botón para volver a
+  // verlas — no hace falta tocar el backend para esto.
+  const [showCancelled, setShowCancelled] = useState(false);
+  const visibleSessions = showCancelled ? sessions : sessions.filter((s) => !s.cancelled);
+  const cancelledCount = sessions.filter((s) => s.cancelled).length;
+
   async function confirmCancel() {
     if (!cancelTarget) return;
     setCancelError("");
@@ -106,22 +135,34 @@ export default function SessionsPage() {
               Instancias reales de clase. Creadas automáticamente por horario o de forma manual.
             </p>
           </div>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 bg-emerald-500 text-neutral-950 hover:bg-emerald-400 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-colors shadow-md shadow-emerald-500/20"
-          >
-            <Plus size={14} />
-            Crear Sesión Manual
-          </button>
+          <div className="flex items-center gap-2">
+            {cancelledCount > 0 && (
+              <button
+                onClick={() => setShowCancelled((v) => !v)}
+                className="text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl border border-neutral-800 hover:border-neutral-700 transition-colors"
+              >
+                {showCancelled ? "Ocultar canceladas" : `Mostrar canceladas (${cancelledCount})`}
+              </button>
+            )}
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-1.5 bg-emerald-500 text-neutral-950 hover:bg-emerald-400 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-colors shadow-md shadow-emerald-500/20"
+            >
+              <Plus size={14} />
+              Crear Sesión Manual
+            </button>
+          </div>
         </div>
 
-        {sessions.length === 0 ? (
+        {visibleSessions.length === 0 ? (
           <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-8 text-center text-neutral-500 text-sm">
-            No hay sesiones de clase registradas actualmente.
+            {sessions.length === 0
+              ? "No hay sesiones de clase registradas actualmente."
+              : "No hay sesiones activas — todas las de este rango están canceladas."}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {sessions.map((session) => {
+            {visibleSessions.map((session) => {
               const teacher = teacherName(session.teacherUserId);
               return (
                 <div
@@ -149,9 +190,53 @@ export default function SessionsPage() {
                     <h3 className="text-xl font-bold text-white mb-1">
                       {formatTimeOfDay(session.startTime)} - {formatTimeOfDay(session.endTime)}
                     </h3>
-                    <p className="text-sm text-neutral-400 mb-4">
-                      Profesor(a): <span className="text-neutral-200">{teacher}</span>
-                    </p>
+
+                    {reassigningId === session.id ? (
+                      <div className="mb-4">
+                        <select
+                          autoFocus
+                          defaultValue=""
+                          disabled={reassignSaving}
+                          onChange={(e) => handleReassignTeacher(session.id, e.target.value)}
+                          className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-2 py-1.5 text-white text-xs outline-none focus:border-emerald-500"
+                        >
+                          <option value="" disabled>
+                            {reassignSaving ? "Guardando…" : "Elegir profesor…"}
+                          </option>
+                          {teachersList.map((t) => (
+                            <option key={t.userId || t.id} value={t.userId || t.id}>
+                              {t.fullName || `${t.firstName} ${t.lastName}`}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => {
+                            setReassigningId(null);
+                            setReassignError("");
+                          }}
+                          disabled={reassignSaving}
+                          className="text-neutral-500 hover:text-white text-[11px] mt-1"
+                        >
+                          Cancelar
+                        </button>
+                        {reassignError && <p className="text-rose-400 text-[11px] mt-1">{reassignError}</p>}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-neutral-400 mb-4">
+                        Profesor(a): <span className="text-neutral-200">{teacher}</span>
+                        {!session.cancelled && (
+                          <button
+                            onClick={() => {
+                              setReassignError("");
+                              setReassigningId(session.id);
+                            }}
+                            className="ml-2 text-emerald-400 hover:text-emerald-300 text-xs font-semibold underline underline-offset-2"
+                          >
+                            {session.teacherUserId ? "Cambiar" : "Asignar"}
+                          </button>
+                        )}
+                      </p>
+                    )}
                   </div>
 
                   <div className="pt-4 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400">

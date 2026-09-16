@@ -5,7 +5,10 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.queue.dto.response.QueueCon
 import com.jhanp.psraerobicsbackend.modules.aerobics.queue.service.interfaces.IQueueConfigService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.jhanp.psraerobicsbackend.security.AuthenticatedUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cola/configuracion")
+// La sala necesita leerla para saber cuántos entran por turno; ajustarla es administración.
+@PreAuthorize(Authorities.STAFF)
 @RequiredArgsConstructor
 @Validated
 public class QueueConfigController {
@@ -43,24 +48,12 @@ public class QueueConfigController {
      * registrar la auditoría.
      */
     @PutMapping
+    @PreAuthorize(Authorities.ADMIN)
     public ResponseEntity<QueueConfigResponse> update(
             @Valid @RequestBody QueueConfigRequest request,
             Authentication authentication) {
 
-        Integer userId = resolveUserId(authentication);
+        Integer userId = AuthenticatedUser.requireId(authentication);
         return ResponseEntity.ok(queueConfigService.update(request, userId));
-    }
-
-    private Integer resolveUserId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof Integer id) {
-            return id;
-        }
-        if (authentication != null) {
-            try {
-                return Integer.parseInt(authentication.getName());
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return 1;
     }
 }

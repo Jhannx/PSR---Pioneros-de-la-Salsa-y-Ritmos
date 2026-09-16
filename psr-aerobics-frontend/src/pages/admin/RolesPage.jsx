@@ -26,33 +26,46 @@ export default function RolesPage() {
     setLoading(true);
     setError("");
     try {
+      const buscar = searchQuery.trim().length >= 2 ? searchQuery.trim() : undefined;
       const params = { page, size: 20 };
-      if (searchQuery.trim().length >= 2) params.buscar = searchQuery.trim();
-      const response = await peopleService.getAll(params);
+      if (buscar) params.buscar = buscar;
+
+      // Antes: una consulta por persona (`getUserRoles` + `getById`, hasta 40 peticiones por
+      // página de 20) — esa era la causa real de la lentitud reportada, no algo que un índice
+      // fuera a arreglar (NOTAS-PARA-FRONTEND.md ronda 5, §0.1). Ahora `GET /api/usuarios` ya
+      // trae `roles` y `active` para toda la página en una sola consulta; se piden en paralelo
+      // con las personas y se cruzan por `userId` (= `UserResponse.id`), sin pedir nada por fila.
+      const usersParams = buscar ? { buscar, size: 200 } : { size: 200 };
+      const [peopleRes, usersRes] = await Promise.allSettled([
+        peopleService.getAll(params),
+        userService.getAll(usersParams),
+      ]);
+
+      if (peopleRes.status !== "fulfilled") throw peopleRes.reason;
+      const response = peopleRes.value;
       const content = response?.content || (Array.isArray(response) ? response : []);
       setPeople(content);
       setPageInfo({ totalPages: response?.totalPages || 0, totalElements: response?.totalElements || 0 });
 
-      const withAccount = content.filter((p) => p.userId);
-      const details = await Promise.allSettled(
-        withAccount.map((p) => Promise.all([userService.getUserRoles(p.userId), userService.getById(p.userId)]))
-      );
-      setAccounts((prev) => {
-        const next = { ...prev };
-        withAccount.forEach((p, idx) => {
-          const result = details[idx];
-          if (result.status === "fulfilled") {
-            const [roles, userResponse] = result.value;
+      if (usersRes.status === "fulfilled") {
+        const usersContent = usersRes.value?.content || (Array.isArray(usersRes.value) ? usersRes.value : []);
+        const byId = new Map(usersContent.map((u) => [u.id, u]));
+        setAccounts((prev) => {
+          const next = { ...prev };
+          content.forEach((p) => {
+            if (!p.userId) return;
+            const u = byId.get(p.userId);
+            if (!u) return; // no vino en esta tanda de 200 — se deja el estado previo si había alguno
             next[p.userId] = {
-              roles: (Array.isArray(roles) ? roles : []).map((r) => r.name || r),
-              active: userResponse?.active ?? true,
+              roles: Array.isArray(u.roles) ? u.roles : [],
+              active: u.active ?? true,
               saving: false,
               error: "",
             };
-          }
+          });
+          return next;
         });
-        return next;
-      });
+      }
     } catch (err) {
       setPeople([]);
       setError(err.data?.message || err.message || "No fue posible consultar las personas.");

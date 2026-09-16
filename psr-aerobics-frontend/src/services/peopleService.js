@@ -45,10 +45,12 @@ export const peopleService = {
     return await apiClient.post(`/api/personas/${id}/solicitar-cambio-correo`, { newEmail });
   },
 
-  confirmEmailChange: async (token) => {
+  confirmEmailChange: async (token, options) => {
     // Público — sin sesión: quien abre el enlace desde su buzón puede no estar logueado.
-    // 400 si el enlace expiró (72h) o ya se usó.
-    return await apiClient.post("/api/personas/confirmar-cambio-correo", { token });
+    // 400 si el enlace expiró (72h) o ya se usó. Acepta `options.signal` — ConfirmEmailChangePage
+    // lo usa para cancelar de verdad la petición en vuelo si React StrictMode remonta el efecto en
+    // dev, en vez de solo ignorar el resultado (errores-13sep-front.md #2).
+    return await apiClient.post("/api/personas/confirmar-cambio-correo", { token }, options);
   },
 
   // Contactos de emergencia 1:N, máx. 5 por persona, todos con el mismo peso — sin orden de

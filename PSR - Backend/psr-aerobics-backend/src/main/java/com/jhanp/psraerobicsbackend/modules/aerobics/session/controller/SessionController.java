@@ -12,7 +12,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import com.jhanp.psraerobicsbackend.security.AuthenticatedUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +28,8 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/sesiones")
+// Ver sesiones y resúmenes: todo el personal. Abrirlas y cerrarlas también — ver CLASS_OPS.
+@PreAuthorize(Authorities.STAFF)
 @RequiredArgsConstructor
 @Validated
 public class SessionController {
@@ -35,6 +40,7 @@ public class SessionController {
      * Creación manual de una sesión por el administrador.
      */
     @PostMapping
+    @PreAuthorize(Authorities.CLASS_OPS)
     public ResponseEntity<SessionResponse> createManual(@RequestBody @Valid SessionRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(sessionService.createManual(request));
@@ -44,10 +50,11 @@ public class SessionController {
      * Cancelación de una sesión. Requiere el usuario que ejecuta la acción para auditoría.
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize(Authorities.CLASS_OPS)
     public ResponseEntity<SessionResponse> cancel(
             @PathVariable @Positive(message = "El ID de sesión debe ser positivo") Integer id,
             Authentication authentication) {
-        Integer userId = resolveUserId(authentication);
+        Integer userId = AuthenticatedUser.requireId(authentication);
         return ResponseEntity.ok(sessionService.cancel(id, userId));
     }
 
@@ -74,8 +81,8 @@ public class SessionController {
      */
     @GetMapping
     public ResponseEntity<Page<SessionResponse>> findBetween(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
             @PageableDefault(size = 20) Pageable pageable) {
         return ResponseEntity.ok(sessionService.findBetween(desde, hasta, pageable));
     }
@@ -84,6 +91,7 @@ public class SessionController {
      * Cierre manual de una sesión (fija la hora de fin).
      */
     @PutMapping("/{id}/cerrar")
+    @PreAuthorize(Authorities.CLASS_OPS)
     public ResponseEntity<SessionResponse> close(
             @PathVariable @Positive(message = "El ID de sesión debe ser positivo") Integer id) {
         return ResponseEntity.ok(sessionService.close(id));
@@ -93,6 +101,7 @@ public class SessionController {
      * Asignación o cambio de profesor de la sesión.
      */
     @PutMapping("/{id}/profesor/{teacherUserId}")
+    @PreAuthorize(Authorities.CLASS_OPS)
     public ResponseEntity<SessionResponse> assignTeacher(
             @PathVariable @Positive(message = "El ID de sesión debe ser positivo") Integer id,
             @PathVariable @Positive(message = "El ID de profesor debe ser positivo") Integer teacherUserId) {
@@ -130,16 +139,4 @@ public class SessionController {
         return ResponseEntity.ok(sessionService.getSummariesBetween(desde, hasta, pageable));
     }
 
-    private Integer resolveUserId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof Integer uid) {
-            return uid;
-        }
-        if (authentication != null) {
-            try {
-                return Integer.parseInt(authentication.getName());
-            } catch (NumberFormatException ignored) {
-            }
-        }
-        return 1;
-    }
 }

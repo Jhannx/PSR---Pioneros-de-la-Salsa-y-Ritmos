@@ -98,18 +98,67 @@ WHERE m.vuelto_entregado = false
   AND m.monto_recibido > m.monto_abonado;
 
 -- vista_recaudo_diario --
+-- La columna id es SINTÉTICA y no es decorativa: DailyRevenueView es una entidad JPA de solo
+-- lectura, y Hibernate exige un @Id. Esta vista no tiene ninguna clave natural que sirva —agrupa por
+-- (fecha, sesion_id), y sesion_id es NULL en los pagos por adelantado, que no cuelgan de ninguna
+-- llegada—, así que la pareja tampoco vale como identificador. Sin esta columna, cualquier lectura
+-- falla con "column drv1_0.id does not exist".
+--
+-- Va la ÚLTIMA a propósito: CREATE OR REPLACE VIEW solo permite añadir columnas al final; meterla
+-- entre las existentes obligaría a un DROP VIEW previo.
+--
+-- No sale a la API: DailyRevenueViewResponse no la declara. Tampoco es estable entre consultas, así
+-- que nadie debe guardarla ni usarla como referencia.
 CREATE OR REPLACE VIEW vista_recaudo_diario AS
 SELECT
     DATE(m.fecha_hora) AS fecha, s.id AS sesion_id,
-    SUM(m.monto_abonado) AS total_recaudado
+    SUM(m.monto_abonado) AS total_recaudado,
+    ROW_NUMBER() OVER (ORDER BY DATE(m.fecha_hora) DESC, s.id) AS id
 FROM movimiento_cuenta m
          LEFT JOIN llegada l ON l.id = m.llegada_id
          LEFT JOIN sesion s ON s.id = l.sesion_id
 GROUP BY DATE(m.fecha_hora), s.id
 ORDER BY fecha DESC, sesion_id;
 
+-- vista_ingreso_diario --
+-- CAJA vs DEVENGO. Esta vista es la segunda; no confundir con vista_recaudo_diario.
+--
+--   vista_recaudo_diario  -> "¿cuánto dinero ENTRÓ hoy?"     agrupa movimiento_cuenta por fecha del pago.
+--                            Sirve para cuadrar la caja al cerrar el día.
+--   vista_ingreso_diario  -> "¿cuánto GENERÓ la clase de hoy?" agrupa asistencia por fecha de la sesión.
+--                            Sirve para el dashboard y cualquier gráfico por día.
+--
+-- La diferencia importa: con la primera, un abono adelantado el lunes para la clase del miércoles
+-- cuenta como ingreso del lunes, y el miércoles aparece artificialmente flojo. Aquí el ingreso se
+-- atribuye a la clase que se dictó, sin importar cuándo se pagó.
+--
+-- Además, así total_asistencias y total_ingreso salen de las MISMAS filas y siempre cuadran entre sí.
+-- Con la caja se podrían ver 30 asistentes con recaudo 0 —si todos pagaron por adelantado—, que en un
+-- dashboard se lee como un error.
+--
+-- LEFT JOIN desde sesion y no INNER: una sesión que se dictó sin nadie confirmado tiene que seguir
+-- apareciendo con 0. Es lo que permite contar "días que tuvieron clase" para el divisor de los
+-- promedios, en vez de dividir entre días de calendario.
+CREATE OR REPLACE VIEW vista_ingreso_diario AS
+SELECT
+    s.fecha,
+    s.id AS sesion_id,
+    COUNT(a.id) AS total_asistencias,
+    COALESCE(SUM(a.monto_cobrado), 0) AS total_ingreso
+FROM sesion s
+         LEFT JOIN llegada l ON l.sesion_id = s.id
+         LEFT JOIN asistencia a ON a.llegada_id = l.id
+WHERE NOT s.cancelada
+GROUP BY s.fecha, s.id
+ORDER BY s.fecha DESC, s.id;
+
 -- vista_recaudo_por_sesion --
 -- Recaudo por sesión, para cuando un día tiene más de una.
+--
+-- Esta NO necesita el id sintético de vista_recaudo_diario, aunque sean casi gemelas: aquí el JOIN es
+-- INNER, así que sesion_id nunca es NULL, y como se agrupa por sesión hay exactamente una fila por
+-- cada una. SessionRevenueView usa sesion_id directamente como @Id y basta. Añadirle un ROW_NUMBER()
+-- solo dejaría una columna que ninguna entidad mapea.
 CREATE OR REPLACE VIEW vista_recaudo_por_sesion AS
 SELECT
     s.fecha, s.id AS sesion_id,
@@ -199,19 +248,40 @@ FROM historial_cambio h
 ORDER BY h.fecha_hora DESC;
 
 -- vista_perfil_persona --
+--
+-- SIN JOIN contra contacto_emergencia, y es obligatorio, no una simplificación.
+--
+-- Esta vista tenía un LEFT JOIN a contacto_emergencia y exponía contacto_emergencia_nombre,
+-- contacto_emergencia_telefono y observaciones_emergencia. Funcionaba porque persona_id era UNIQUE:
+-- como mucho había una fila que unir. Al pasar los contactos a 1:N ese JOIN multiplica: una persona
+-- con tres contactos saldría TRES veces en la vista, y con ella su saldo, sus días de crédito y su
+-- conteo de asistencias — tres perfiles distintos para la misma persona.
+--
+-- Es un fallo que en pruebas no se vería, porque hoy nadie tiene más de un contacto, y que aparece
+-- el día que alguien registra el segundo. Por eso los contactos salen de aquí y se piden a su propio
+-- endpoint (GET /api/personas/{id}/contactos-emergencia), que es donde una lista sí cabe.
+--
+-- observaciones_salud sí se queda: ahora es una columna de persona, una sola por fila, y no
+-- multiplica nada.
+--
+-- DROP explícito y no solo CREATE OR REPLACE: este cambio QUITA columnas, y CREATE OR REPLACE VIEW
+-- solo sabe añadirlas al final ("cannot drop columns from view"). Como este archivo es repetible y
+-- se reejecuta en cuanto cambia su contenido, sin el DROP fallaría contra cualquier base que ya
+-- tuviera la versión anterior. Nada depende de esta vista, así que no hace falta CASCADE.
+DROP VIEW IF EXISTS vista_perfil_persona;
+
 CREATE OR REPLACE VIEW vista_perfil_persona AS
 SELECT
     p.id AS persona_id,
     p.nombre || ' ' || p.apellidos AS nombre_completo,
     p.tipo_documento, p.numero_documento, p.telefono, p.activo,
-    ce.nombre AS contacto_emergencia_nombre, ce.telefono AS contacto_emergencia_telefono,
-    ce.observaciones AS observaciones_emergencia,
+    p.fecha_nacimiento,
+    p.observaciones_salud,
     sp.saldo,
     fn_dias_credito_disponible(p.id) AS dias_credito_disponible,
     COALESCE(res.total_asistencias, 0) AS total_asistencias,
     res.ultima_asistencia_fecha, res.ultima_asistencia_hora
 FROM persona p
-         LEFT JOIN contacto_emergencia ce ON ce.persona_id = p.id
          LEFT JOIN vista_saldo_persona sp ON sp.persona_id = p.id
          LEFT JOIN (
     SELECT l.persona_id,

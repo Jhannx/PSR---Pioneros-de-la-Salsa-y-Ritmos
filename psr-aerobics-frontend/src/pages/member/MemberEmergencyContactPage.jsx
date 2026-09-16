@@ -4,6 +4,7 @@ import { Phone, User, MessageSquareText, Tags, CheckCircle2, ChevronLeft, Plus, 
 import Field from "../../components/forms/Field";
 import { useAuth } from "../../context/AuthContext";
 import { peopleService } from "../../services/peopleService";
+import { isValidEmergencyContactPhone } from "../../utils/validation";
 
 const CONDITION_CHIPS = [
   "Asma",
@@ -89,6 +90,15 @@ export default function MemberEmergencyContactPage({ onBack }) {
           const value = profile.value?.healthObservations || "";
           setSavedHealthValue(value);
           setFreeText(value);
+        } else {
+          // Antes esto fallaba en silencio (errores-12sep-front.md #2): un 500 de
+          // GET /api/personas/{id}/perfil dejaba el campo de observaciones vacío sin avisar,
+          // indistinguible de "todavía no tiene nada guardado". `prev || ...` para no pisar un
+          // error de contactos que ya se haya mostrado arriba.
+          setLoadError(
+            (prev) =>
+              prev || profile.reason?.data?.message || profile.reason?.message || "No fue posible cargar tu perfil."
+          );
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -117,10 +127,18 @@ export default function MemberEmergencyContactPage({ onBack }) {
       ? freeText.trim()
       : [...selectedChips, otherText.trim()].filter(Boolean).join(", ");
 
+  // El teléfono ahora es obligatorio del lado del backend (NOTAS-PARA-FRONTEND.md ronda 5, §1.3 —
+  // "cambio rompedor, y ya está dentro"): `POST/PUT` de contactos de emergencia rechazan con 400 un
+  // cuerpo sin teléfono. La regla exacta es `^\+?[0-9 ]{7,20}$` — a propósito NO se usa el mínimo
+  // de 10 dígitos del resto de la app: el backend advierte explícitamente no hacerla más estricta
+  // que la suya, o se bloquean números que el servidor sí acepta (ej. un fijo de 7 dígitos).
+  const phoneTooShort = newPhone.trim().length > 0 && !isValidEmergencyContactPhone(newPhone);
+  const phoneValid = isValidEmergencyContactPhone(newPhone);
+
   async function handleAddContact() {
     const name = newName.trim();
     const phone = newPhone.trim();
-    if (!name && !phone) return; // al menos uno de los dos, igual que exige el backend
+    if (!phoneValid) return;
     setSavingContact(true);
     setAddError("");
     try {
@@ -253,6 +271,9 @@ export default function MemberEmergencyContactPage({ onBack }) {
                   className={inputClass}
                 />
               </Field>
+              {phoneTooShort && (
+                <p className="text-amber-400 text-xs -mt-1.5">Ingresa un número de teléfono válido.</p>
+              )}
               {addError && <p className="text-rose-400 text-xs">{addError}</p>}
               <div className="flex gap-2">
                 <button
@@ -268,7 +289,8 @@ export default function MemberEmergencyContactPage({ onBack }) {
                 </button>
                 <button
                   onClick={handleAddContact}
-                  disabled={(!newName.trim() && !newPhone.trim()) || savingContact}
+                  disabled={!phoneValid || savingContact}
+                  title={!phoneValid ? "Ingresa un número de teléfono válido" : undefined}
                   className="flex-1 bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 text-neutral-950 font-bold py-2.5 rounded-xl transition-colors text-sm"
                 >
                   {savingContact ? "Agregando…" : "Agregar"}

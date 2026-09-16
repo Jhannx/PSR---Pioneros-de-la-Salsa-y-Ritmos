@@ -9,8 +9,6 @@ import { peopleService } from "../../services/peopleService";
 import { paymentsService } from "../../services/paymentsService";
 import { queueService } from "../../services/queueService";
 
-const WEEK_DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-
 export default function MemberHomePage() {
   const { user } = useAuth();
   const { queue } = useMockData();
@@ -43,6 +41,14 @@ export default function MemberHomePage() {
 
   const name = profile?.fullName || user?.fullName || "Usuario";
   const initials = getInitialsFromFullName(name);
+
+  // Antes esta franja mostraba "asistencias de la semana" con un check falso cada día
+  // (`isPaid` fijo en `false`) — no eran datos reales de asistencia, contradecía lo que la
+  // persona sabía de sí misma (errores-12sep-front.md #5). `vista_perfil_persona` ya calcula
+  // `dias_credito_disponible` (columna) → `PersonProfileViewResponse.availableCreditDays` (record,
+  // psr-aerobics-backend) — confirmado leyendo el backend real, GET /api/personas/{id}/perfil ya
+  // lo expone con ese nombre, no hace falta pedir nada nuevo.
+  const creditDays = profile?.availableCreditDays ?? null;
 
   // `queue` (GET /api/cola/admin) solo responde para roles de personal — para un MIEMBRO puro
   // llega vacía en silencio (DataContext.refreshData descarta el 403 con Promise.allSettled).
@@ -111,31 +117,20 @@ export default function MemberHomePage() {
             )}
           </div>
 
-          {/* Week Strip */}
-          <div className="mt-6">
-            <p className="text-neutral-500 text-xs font-semibold uppercase tracking-wide mb-3 text-center">
-              Tus asistencias esta semana
-            </p>
-            <div className="flex justify-between bg-neutral-950 border border-neutral-800 rounded-2xl p-3">
-              {WEEK_DAYS.map((day) => {
-                const isPaid = false;
-                return (
-                  <div key={day} className="flex flex-col items-center gap-1.5">
-                    <span className="text-[10px] text-neutral-500 font-medium">{day}</span>
-                    <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                        isPaid
-                          ? "bg-emerald-500 text-neutral-950 shadow-md shadow-emerald-500/20"
-                          : "bg-neutral-900 border border-neutral-800 text-neutral-600"
-                      }`}
-                    >
-                      {isPaid ? "✓" : ""}
-                    </div>
-                  </div>
-                );
-              })}
+          {/* Días de crédito disponible — reemplaza la franja semanal de asistencias falsas. */}
+          {creditDays !== null && (
+            <div className="mt-6">
+              <p className="text-neutral-500 text-xs font-semibold uppercase tracking-wide mb-3 text-center">
+                Días de crédito disponible
+              </p>
+              <div className="flex items-center justify-center gap-2 bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
+                <span className="text-3xl font-bold text-emerald-400">{creditDays}</span>
+                <span className="text-neutral-500 text-sm">
+                  {creditDays === 1 ? "día pagado por adelantado" : "días pagados por adelantado"}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Attendance Action */}
           <div className="mt-6 pt-4 border-t border-neutral-800">

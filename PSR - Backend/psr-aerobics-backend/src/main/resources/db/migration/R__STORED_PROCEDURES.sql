@@ -1,23 +1,43 @@
 -- PSR Aeróbicos — Procedimientos
 
+-- sp_registrar_persona --
+-- DROP explícito antes de crear, por la misma razón que en sp_registrar_usuario_para_persona: en
+-- Postgres los parámetros OUT forman parte de la identidad de un procedimiento, así que agregar
+-- p_fecha_nacimiento NO reemplaza al anterior — crea una SOBRECARGA, y el CALL de seis argumentos
+-- queda ambiguo. El síntoma no apunta al procedimiento: lo que se ve es que toda alta de persona
+-- deja de funcionar. Sin lista de tipos porque solo hay uno con este nombre.
+DROP PROCEDURE IF EXISTS sp_registrar_persona;
+
+-- Sin DEFAULT en p_fecha_nacimiento, a propósito: un parámetro con valor por defecto delante de un
+-- OUT es terreno resbaladizo en Postgres, y no hace falta. El único que llama a este procedimiento
+-- es PersonProcedureRepository, que siempre pasa el argumento —null cuando no hay fecha—, así que
+-- la columna sigue admitiendo NULL sin necesidad de que el parámetro sea opcional.
 CREATE OR REPLACE PROCEDURE sp_registrar_persona(
     IN  p_tipo_documento tipo_documento_enum, IN p_numero_documento VARCHAR(20),
     IN  p_nombre VARCHAR(100), IN p_apellidos VARCHAR(100), IN p_telefono VARCHAR(20),
+    IN  p_fecha_nacimiento DATE,
     IN  p_fuente_registro fuente_registro_enum,
     OUT p_persona_id INTEGER
 )
     LANGUAGE plpgsql AS $$
 BEGIN
-    INSERT INTO persona (tipo_documento, numero_documento, nombre, apellidos, telefono, fuente_registro)
-    VALUES (p_tipo_documento, p_numero_documento, p_nombre, p_apellidos, p_telefono, p_fuente_registro)
+    INSERT INTO persona (tipo_documento, numero_documento, nombre, apellidos, telefono,
+                         fuente_registro, fecha_nacimiento)
+    VALUES (p_tipo_documento, p_numero_documento, p_nombre, p_apellidos, p_telefono,
+            p_fuente_registro, p_fecha_nacimiento)
     RETURNING id INTO p_persona_id;
 END;
 $$;
 
 -- sp_registrar_usuario_para_persona --
 -- Crea la cuenta de acceso (rol MIEMBRO) para una persona que ya existe.
+-- DROP explícito antes de crear: en Postgres los OUT forman parte de la identidad de un
+-- procedimiento, así que agregar p_correo NO reemplaza al anterior, crea una sobrecarga y el CALL
+-- de tres argumentos queda ambiguo. Sin lista de tipos porque solo hay uno con este nombre.
+DROP PROCEDURE IF EXISTS sp_registrar_usuario_para_persona;
+
 CREATE OR REPLACE PROCEDURE sp_registrar_usuario_para_persona(
-    IN  p_persona_id INTEGER, IN p_password_hash TEXT,
+    IN  p_persona_id INTEGER, IN p_password_hash TEXT, IN p_correo VARCHAR(150),
     OUT p_usuario_id INTEGER
 )
     LANGUAGE plpgsql AS $$
@@ -28,8 +48,11 @@ BEGIN
         RAISE EXCEPTION 'La persona % no existe', p_persona_id;
     END IF;
 
-    INSERT INTO usuario (numero_documento, password_hash, persona_id)
-    SELECT numero_documento, p_password_hash, id FROM persona WHERE id = p_persona_id
+    -- El correo sí llega como parámetro: es un dato de la CUENTA, no de la persona, y es opcional.
+    -- Sin él la cuenta se identifica solo por documento, que es lo que permite
+    -- chk_usuario_identificador.
+    INSERT INTO usuario (numero_documento, correo, password_hash, persona_id)
+    SELECT numero_documento, p_correo, p_password_hash, id FROM persona WHERE id = p_persona_id
     RETURNING id INTO p_usuario_id;
 
     -- Si se necesitan más roles se agrega desde sp_asignar_rol, inicialmente todo usuario es un miembro
@@ -129,13 +152,19 @@ BEGIN
         RAISE EXCEPTION 'Ya existe una sesión para el horario % en la fecha %', p_horario_id, p_fecha;
     END IF;
 
-    -- Si se asigna profesor, debe tener el rol PROFESOR.
+    -- Quien dicta la clase debe ser PROFESOR o ADMIN.
+    --
+    -- ADMIN entra aquí a partir del 13-sep: en una academia pequeña quien administra también da
+    -- clase, y obligar a darse a sí mismo el rol PROFESOR para poder aparecer en el selector era
+    -- papeleo que además ensucia los permisos. El nombre del parámetro se queda como
+    -- p_profesor_usuario_id para no romper a quien ya lo llama.
     IF p_profesor_usuario_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM usuario_rol ur
                           JOIN rol r ON r.id = ur.rol_id
-        WHERE ur.usuario_id = p_profesor_usuario_id AND r.nombre = 'PROFESOR'
+        WHERE ur.usuario_id = p_profesor_usuario_id
+          AND r.nombre IN ('PROFESOR', 'ADMIN')
     ) THEN
-        RAISE EXCEPTION 'El usuario % no tiene el rol PROFESOR', p_profesor_usuario_id;
+        RAISE EXCEPTION 'El usuario % no puede dictar clase: necesita rol PROFESOR o ADMIN', p_profesor_usuario_id;
     END IF;
 
     INSERT INTO sesion (horario_id, fecha, hora_inicio, hora_fin, profesor_usuario_id)
@@ -223,8 +252,10 @@ CREATE OR REPLACE PROCEDURE sp_registrar_reembolso(
 )
     LANGUAGE plpgsql AS $$
 DECLARE
-    v_persona_id      INTEGER;
-    v_monto_original  NUMERIC;
+    v_persona_id        INTEGER;
+    v_monto_original    NUMERIC;
+    v_ya_reembolsado    NUMERIC;
+    v_disponible        NUMERIC;
 BEGIN
     SELECT persona_id, monto_abonado INTO v_persona_id, v_monto_original
     FROM movimiento_cuenta
@@ -238,8 +269,22 @@ BEGIN
         RAISE EXCEPTION 'El monto del reembolso debe ser positivo';
     END IF;
 
-    IF p_monto > v_monto_original THEN
-        RAISE EXCEPTION 'El reembolso (%) no puede superar el monto original abonado (%)', p_monto, v_monto_original;
+    -- Lo ya devuelto contra ESTE abono. Los reembolsos guardan monto_abonado en negativo, de ahí el
+    -- signo cambiado al sumarlos.
+    --
+    -- Sin esta resta el tope se comparaba siempre contra el abono entero, así que un mismo abono de
+    -- 2500 se podía reembolsar cuantas veces se quisiera, 2500 cada vez: la validación parecía
+    -- proteger y no protegía nada. Es un agujero de dinero, no una imprecisión.
+    SELECT COALESCE(SUM(-monto_abonado), 0) INTO v_ya_reembolsado
+    FROM movimiento_cuenta
+    WHERE movimiento_original_id = p_movimiento_original_id
+      AND tipo_movimiento = 'REEMBOLSO';
+
+    v_disponible := v_monto_original - v_ya_reembolsado;
+
+    IF p_monto > v_disponible THEN
+        RAISE EXCEPTION 'El reembolso (%) supera lo que queda por devolver de ese abono (%). Abonado: %, ya devuelto: %',
+            p_monto, v_disponible, v_monto_original, v_ya_reembolsado;
     END IF;
 
     INSERT INTO movimiento_cuenta
@@ -277,7 +322,9 @@ DECLARE
     v_usuario_id INTEGER;
 BEGIN
     IF NOT p_force THEN
-        RAISE EXCEPTION 'sp_eliminar_persona exige force = true — esta operación es irreversible';
+        -- 75000: habla del procedimiento y de su parámetro, no de nada que el usuario pueda corregir.
+        RAISE EXCEPTION 'sp_eliminar_persona exige force = true — esta operación es irreversible'
+            USING ERRCODE = '75000';
     END IF;
 
     IF p_persona_id = 999999999 THEN
@@ -368,36 +415,10 @@ BEGIN
 END;
 $$;
 
--- sp_solicitar_recuperacion de contraseña --
-CREATE OR REPLACE PROCEDURE sp_solicitar_recuperacion(
-    IN p_usuario_id INTEGER, OUT p_token TEXT
-)
-    LANGUAGE plpgsql AS $$
-BEGIN
-    p_token := encode(gen_random_bytes(32), 'hex');
-
-    INSERT INTO token_recuperacion (usuario_id, token, fecha_expiracion)
-    VALUES (p_usuario_id, p_token, now() + interval '1 hour');
-END;
-$$;
-
--- sp_restablecer_password --
-CREATE OR REPLACE PROCEDURE sp_restablecer_password(
-    IN p_token TEXT, IN p_nueva_password_hash TEXT
-)
-    LANGUAGE plpgsql AS $$
-DECLARE
-    v_usuario_id INTEGER;
-BEGIN
-    SELECT usuario_id INTO v_usuario_id
-    FROM token_recuperacion
-    WHERE token = p_token AND usado = false AND fecha_expiracion > now();
-
-    IF v_usuario_id IS NULL THEN
-        RAISE EXCEPTION 'Token inválido, expirado o ya utilizado';
-    END IF;
-
-    UPDATE usuario SET password_hash = p_nueva_password_hash WHERE id = v_usuario_id;
-    UPDATE token_recuperacion SET usado = true WHERE token = p_token;
-END;
-$$;
+-- Los tokens de contraseña ya no se manejan aquí.
+--
+-- sp_solicitar_recuperacion y sp_restablecer_password ya no existen. Los
+-- reemplaza PasswordTokenService en Java, que guarda el SHA-256 del token en vez del token en claro y
+-- aplica ventanas distintas según el tipo (invitación larga, recuperación corta). Esa política
+-- necesita conocer la contraseña en claro para hashearla con BCrypt, cosa que no puede hacerse desde
+-- plpgsql.

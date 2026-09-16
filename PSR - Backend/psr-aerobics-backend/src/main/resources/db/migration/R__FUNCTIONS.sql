@@ -9,7 +9,10 @@ BEGIN
     SELECT monto INTO v_monto FROM tarifa WHERE id = 1;
 
     IF v_monto IS NULL THEN
-        RAISE EXCEPTION 'No hay tarifa configurada (falta la fila id=1 en tarifa)';
+        -- 75000: es un fallo de instalación —falta una fila que el esquema da por hecha—, y el
+        -- mensaje habla de tablas e ids. Sale como 500 y queda en el log.
+        RAISE EXCEPTION 'No hay tarifa configurada (falta la fila id=1 en tarifa)'
+            USING ERRCODE = '75000';
     END IF;
 
     RETURN v_monto;

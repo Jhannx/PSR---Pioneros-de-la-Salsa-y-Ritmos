@@ -7,7 +7,9 @@ import com.jhanp.psraerobicsbackend.modules.role.service.interfaces.IUserRoleSer
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,6 +20,8 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/usuarios/{userId}/roles")
+// Quién puede qué en el sistema. Si esto no fuera solo de ADMIN, cualquiera podría ascenderse.
+@PreAuthorize(Authorities.ADMIN)
 @RequiredArgsConstructor
 @Validated
 public class UserRoleController {

@@ -1,7 +1,11 @@
 package com.jhanp.psraerobicsbackend.modules.aerobics.report.service.interfaces;
 
 import com.jhanp.psraerobicsbackend.modules.aerobics.report.dto.response.DailyRevenueViewResponse;
+import com.jhanp.psraerobicsbackend.modules.aerobics.report.dto.response.DashboardResponse;
 import com.jhanp.psraerobicsbackend.modules.aerobics.report.dto.response.SessionRevenueViewResponse;
+import com.jhanp.psraerobicsbackend.modules.person.dto.response.PersonBalanceViewResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -26,4 +30,18 @@ public interface IReportService {
     Optional<SessionRevenueViewResponse> getSessionRevenue(Integer sessionId);
 
     List<SessionRevenueViewResponse> getSessionRevenueBetween(LocalDate from, LocalDate to);
+
+    /**
+     * Métricas del dashboard, ya calculadas: el front solo las pinta.
+     * <p>
+     * Los ingresos son devengados —atribuidos a la fecha de la clase, no a la del pago—, a diferencia
+     * de los métodos de recaudo de arriba, que responden "cuánto entró en caja".
+     *
+     * @param date  el día del que se quieren los totales
+     * @param from  inicio de la ventana de los promedios; null → los 30 días que terminan en date
+     * @param to    fin de la ventana; null → date
+     */
+    DashboardResponse getDashboard(LocalDate date, LocalDate from, LocalDate to);
+
+    Page<PersonBalanceViewResponse> getPersonBalances(Pageable pageable);
 }

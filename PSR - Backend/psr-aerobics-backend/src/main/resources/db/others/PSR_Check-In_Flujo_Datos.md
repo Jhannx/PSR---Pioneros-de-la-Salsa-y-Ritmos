@@ -158,7 +158,7 @@ la agregación es SQL.
 
 | Ruta | Service | Repositorio | Objeto SQL |
 |---|---|---|---|
-| `POST /` · `POST /autoregistro` | `create(req, ADMIN\|AUTOREGISTRO)` | `PersonProcedureRepository` + `IUserService` | `sp_registrar_persona` + `sp_registrar_usuario_para_persona` |
+| `POST /` · `POST /autoregistro` | `RegisterService.registerByAdmin` · `.registerSelf` | `PersonProcedureRepository` + `IUserService` + `IInvitationService` | `sp_registrar_persona` + `sp_registrar_usuario_para_persona` |
 | `GET /?buscar=` | `findAll` / `search` | `PersonRepository` (+ `UserRepository` para el `userId`) | tabla `persona` |
 | `GET /{id}` | `findById` | idem | idem |
 | `PUT /{id}` | `update` | `PersonRepository` | UPDATE |
@@ -197,19 +197,32 @@ Dos procedimientos en **una sola transacción**: si falla el segundo, la persona
 queda registrada.
 
 ```
-PersonRequest ─► PersonService.create(request, ADMIN | AUTOREGISTRO)
+PersonRequest ─► RegisterService.registerByAdmin(...) | .registerSelf(...)
                    │
-                   ├─ 1. ¿documento duplicado? → 409 antes de tocar la BD
-                   ├─ 2. CALL sp_registrar_persona(...)              ──► OUT persona_id
-                   ├─ 3. UserService.createForPerson(personaId, clave)
+                   ├─ 1. PersonService.createPerson(request, ADMIN | AUTOREGISTRO)
+                   │       ├─ ¿documento duplicado? → 409 antes de tocar la BD
+                   │       └─ CALL sp_registrar_persona(...)          ──► OUT persona_id
+                   ├─ 2. UserService.createForPerson(personaId, clave, correo)
+                   │       ├─ ¿correo duplicado? → 409
                    │       ├─ PasswordEncoder.encode(...)   (el hash se calcula en Java)
                    │       └─ CALL sp_registrar_usuario_para_persona ──► OUT usuario_id
                    │            └─ inserta también el rol MIEMBRO
+                   ├─ 3. InvitationService.invite(usuarioId)   (solo si hay correo)
+                   │       ├─ emite el token de invitación (48 h)
+                   │       └─ publica el evento; el correo sale DESPUÉS del commit
                    └─ 4. relee la persona y arma PersonResponse
 ```
 
+Quien coordina es **`RegisterService`**, no `PersonService`: es el único punto donde persona, cuenta y
+correo ocurren en la misma transacción. `PersonService` solo sabe de personas, y `UserService` solo
+toma los datos, crea el usuario y hashea.
+
 `source` lo decide **la ruta**, no el cliente. Sin contraseña en el request, la inicial es
-el propio número de documento (RF-01).
+el propio número de documento (RF-01). El correo es opcional: sin él la cuenta se identifica solo por
+documento, que es el caso normal del kiosko.
+
+El envío del correo va en `@TransactionalEventListener(AFTER_COMMIT)` con try/catch, así que un SMTP
+caído no tumba el alta — la persona ya puede entrar con su número de documento.
 
 **Por qué se relee en el paso 4:** el procedimiento solo devuelve el id por `OUT`.
 `registeredAt`, `active` y `source` los pone la base.

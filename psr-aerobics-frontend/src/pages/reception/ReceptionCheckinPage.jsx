@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { formatCOP } from "../../utils/currency";
-import { formatHeaderDateShort as formatHeaderDate } from "../../utils/date";
+import { formatHeaderDateShort as formatHeaderDate, formatTimeOfDay } from "../../utils/date";
 import { DAILY_RATE as FALLBACK_RATE, getUpcomingDays } from "../../features/reception/utils";
 import QueueRow from "../../features/reception/components/QueueRow";
 import RefundModal from "../../features/reception/components/RefundModal";
@@ -18,7 +18,7 @@ const FILTERS = [
 ];
 
 export default function ReceptionCheckinPage() {
-  const { queue, updateQueueItem, refreshData } = useMockData();
+  const { queue, sessions, updateQueueItem, refreshData, refreshQueue } = useMockData();
   const [activeFilter, setActiveFilter] = useState("all");
   const [dailyRate, setDailyRate] = useState(FALLBACK_RATE);
   const [paymentMethods, setPaymentMethods] = useState([]);
@@ -41,8 +41,11 @@ export default function ReceptionCheckinPage() {
           paymentsService.getPaymentMethods(),
         ]);
 
-        if (pricingRes.status === "fulfilled" && pricingRes.value?.monto) {
-          setDailyRate(Number(pricingRes.value.monto));
+        // `PricingResponse.amount` (openapi.md) — leía `.monto`, un campo que el backend nunca
+        // manda, así que esta condición era siempre falsa y la pantalla se quedaba callada con
+        // `FALLBACK_RATE` para siempre, aunque el fetch sí se hacía (errores-12sep-front.md #7).
+        if (pricingRes.status === "fulfilled" && pricingRes.value?.amount) {
+          setDailyRate(Number(pricingRes.value.amount));
         }
 
         if (methodsRes.status === "fulfilled" && Array.isArray(methodsRes.value)) {
@@ -56,6 +59,17 @@ export default function ReceptionCheckinPage() {
   }, []);
 
   const totalCollected = queue.reduce((sum, p) => sum + Number(p.amountCharged || 0), 0);
+
+  // "No se que estoy cobrando, ni a que sesión le estoy asignando el pago" (problemas-finales,
+  // 13-sep) — `TodayQueueViewResponse.sessionId` ya viaja en cada fila, solo faltaba mostrarlo.
+  // `sessions` puede no tener cargada la del checkin todavía (recién creada por adelantado, por
+  // ejemplo) — en ese caso se muestra el id crudo en vez de romper.
+  const sessionsById = new Map(sessions.map((s) => [s.id, s]));
+  function sessionLabel(sessionId) {
+    const session = sessionsById.get(sessionId);
+    if (!session) return sessionId ? `Sesión #${sessionId}` : "Sin sesión";
+    return `${formatTimeOfDay(session.startTime)} - ${formatTimeOfDay(session.endTime)}`;
+  }
 
   const filteredQueue = queue.filter((item) => {
     const balance = Number(item.balance || 0);
@@ -72,56 +86,50 @@ export default function ReceptionCheckinPage() {
     settled: queue.filter((p) => Number(p.balance || 0) === 0).length,
   };
 
-  async function handleAmountChange(checkinId, newAmount) {
-    const current = queue.find((p) => p.checkinId === checkinId);
-    if (!current) return;
-    const newBalance = newAmount - dailyRate;
-    updateQueueItem(checkinId, {
-      amountCharged: newAmount,
-      balance: newBalance,
-    });
-  }
-
-  async function handleSettle(checkinId) {
+  // Reemplaza `handleAmountChange` + `handleSettle` + `handleDeliverChange` de antes — esos tres
+  // manipulaban `item.balance`/`amountCharged` a mano, pisando el saldo REAL de la cuenta que
+  // manda el backend (`vista_saldo_persona`, un crédito acumulado de toda la vida, no algo "de
+  // hoy"). Ahora una sola acción registra el cobro real (`POST /api/movimientos`, que el backend ya
+  // soporta con `monto_recibido > monto_abonado` sin cambios de su lado — confirmado en
+  // `sp_registrar_movimiento`), y el saldo mostrado se refresca solo vía WebSocket/REST, nunca se
+  // calcula en el front.
+  //
+  // `mode`:
+  //  - "change": aplica como máximo la tarifa del día; cualquier excedente se entrega como vuelto
+  //    de inmediato (nunca queda pendiente).
+  //  - "advance": aplica tantos días completos como el monto alcance a cubrir (tarifa de hoy +
+  //    días por adelantado); lo que sobra sin llegar a cubrir un día más también se entrega como
+  //    vuelto de inmediato — decisión del 13-sep: "dejar sesiones pagas es pagarlas por completo".
+  async function handleCharge(checkinId, amount, mode = "change") {
     const item = queue.find((p) => p.checkinId === checkinId);
-    if (!item || !item.personId) return;
-    const owed = Math.abs(Number(item.balance || 0));
-    if (owed <= 0) return;
+    if (!item || !item.personId || !(amount > 0)) return;
     setActionError("");
     try {
       const defaultMethodId = paymentMethods[0]?.id || 1;
-      await paymentsService.createMovement({
+      const daysCovered = mode === "advance" ? Math.max(1, Math.floor(amount / dailyRate)) : 1;
+      const amountApplied = Math.min(amount, daysCovered * dailyRate);
+      const remainder = amount - amountApplied;
+      const note =
+        daysCovered > 1
+          ? `Cobro de entrada + ${daysCovered - 1} día(s) por adelantado`
+          : "Cobro de entrada en recepción";
+
+      const movement = await paymentsService.createMovement({
         personId: item.personId,
         checkinId,
         paymentMethodId: defaultMethodId,
-        amountReceived: owed,
-        amountApplied: owed,
-        note: "Cobro de entrada en recepción",
+        amountReceived: amount,
+        amountApplied,
+        note,
       });
-      updateQueueItem(checkinId, {
-        amountCharged: dailyRate,
-        balance: 0.0,
-      });
+
+      if (remainder > 0 && movement?.id) {
+        await paymentsService.deliverChange(movement.id);
+      }
+
+      await refreshQueue();
     } catch (err) {
       setActionError(err.data?.message || err.message || "No se pudo registrar el cobro.");
-    }
-  }
-
-  async function handleDeliverChange(checkinId) {
-    setActionError("");
-    try {
-      const movements = await paymentsService.getMovementsByCheckin(checkinId);
-      const paymentMovement = (Array.isArray(movements) ? movements : []).find(
-        (m) => m.movementType === "PAYMENT"
-      );
-      if (!paymentMovement) {
-        setActionError("No se encontró el movimiento original de pago para entregar el vuelto.");
-        return;
-      }
-      await paymentsService.deliverChange(paymentMovement.id);
-      updateQueueItem(checkinId, { amountCharged: dailyRate, balance: 0.0 });
-    } catch (err) {
-      setActionError(err.data?.message || err.message || "No se pudo entregar el vuelto.");
     }
   }
 
@@ -188,11 +196,11 @@ export default function ReceptionCheckinPage() {
         amountApplied: totalAdvance,
         note: `Pago por adelantado (${days} días)`,
       });
-      updateQueueItem(advanceModalId, {
-        amountCharged: totalAdvance,
-        balance: 0.0,
-        note: `Pagó ${days} día${days > 1 ? "s" : ""} por adelantado`,
-      });
+      // Antes esto también adivinaba `amountCharged`/`balance` en local — mismo defecto que
+      // `handleCharge`/`handleConfirmRefund` ya corrigen: el saldo real llega solo por
+      // WebSocket/REST, nunca se recalcula a mano (era parte de por qué el saldo de $40.500 del
+      // reporte de hoy no cuadraba con lo que el reembolso veía).
+      await refreshQueue();
       setAdvanceModalId(null);
       setSelectedDays([0]);
     } catch (err) {
@@ -200,34 +208,31 @@ export default function ReceptionCheckinPage() {
     }
   }
 
+  // `POST /api/personas/{id}/reembolso` (RESPUESTA-NOTAS-FINAL.md #1) reemplaza todo el parche
+  // anterior: antes había que pedir los movimientos del checkin, calcular a mano cuánto quedaba
+  // pendiente en cada uno, y encadenar una llamada por abono — lógica de negocio que vivía en el
+  // front sin necesidad. Ahora el backend recibe un monto total y decide él mismo el reparto
+  // (FIFO, todo o nada, en una sola transacción); si el monto pedido no alcanza, ni siquiera
+  // aplica nada y responde 400 con lo disponible en el mensaje. El tope que se muestra en el modal
+  // es directamente el saldo real de la cuenta (`item.balance`, cuando es positivo = "a favor") —
+  // es la misma bolsa de dinero que el backend usa para decidir "cuánto le queda pendiente por
+  // devolver".
+  function handleOpenRefund(item) {
+    setActionError("");
+    setRefundTarget(item);
+  }
+
   async function handleConfirmRefund(amount, selectedMethodId) {
     if (!refundTarget) return;
-    const current = queue.find((p) => p.checkinId === refundTarget.checkinId);
-    if (!current) {
-      setRefundTarget(null);
-      return;
-    }
-
     setActionError("");
     try {
-      const movements = await paymentsService.getMovementsByCheckin(refundTarget.checkinId);
-      const paymentMovement = (Array.isArray(movements) ? movements : []).find(
-        (m) => m.movementType === "PAYMENT"
-      );
-      if (!paymentMovement) {
-        setActionError("No se encontró el movimiento original de pago para reembolsar.");
-        return;
-      }
-      await paymentsService.processRefund(paymentMovement.id, {
-        paymentMethodId: selectedMethodId,
+      await paymentsService.refundPerson(refundTarget.personId, {
         amount,
+        paymentMethodId: selectedMethodId,
         note: "Reembolso solicitado en recepción",
       });
-      const newAmount = Math.max(0, Number(current.amountCharged || 0) - amount);
-      updateQueueItem(refundTarget.checkinId, {
-        amountCharged: newAmount,
-        balance: newAmount - dailyRate,
-      });
+      // El saldo real llega solo, vía WebSocket/REST — nunca se recalcula a mano en el front.
+      await refreshQueue();
       setRefundTarget(null);
     } catch (err) {
       setActionError(err.data?.message || err.message || "No se pudo procesar el reembolso.");
@@ -302,6 +307,18 @@ export default function ReceptionCheckinPage() {
 
         {/* Lista de Fila de Recepción */}
         <div className="flex flex-col gap-2.5">
+          {/* Encabezado de columnas — antes la lista no tenía ninguno y no se distinguía qué era
+              cada campo sin pasar el mouse (errores-13sep-front.md #4). Oculto en pantallas
+              angostas porque QueueRow ya repite cada etiqueta ahí (`block sm:hidden`). */}
+          {filteredQueue.length > 0 && (
+            <div className="hidden sm:flex items-center gap-3 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              <span className="w-6 text-center shrink-0">#</span>
+              <span className="flex-1 min-w-[220px]">Nombre / Fuente</span>
+              <span className="w-40 shrink-0">Monto a Cobrar</span>
+              <span className="w-40 shrink-0">Saldo</span>
+              <span className="w-36 shrink-0 text-right">Asistencia</span>
+            </div>
+          )}
           {filteredQueue.length === 0 ? (
             <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-8 text-center text-neutral-500 text-sm">
               No hay personas registradas en la fila de recepción con los filtros seleccionados.
@@ -312,16 +329,16 @@ export default function ReceptionCheckinPage() {
                 key={item.checkinId || index}
                 item={item}
                 position={index + 1}
-                onAmountChange={(val) => handleAmountChange(item.checkinId, val)}
-                onSettle={() => handleSettle(item.checkinId)}
-                onDeliverChange={() => handleDeliverChange(item.checkinId)}
+                dailyRate={dailyRate}
+                sessionLabel={sessionLabel(item.sessionId)}
+                onCharge={(amount, mode) => handleCharge(item.checkinId, amount, mode)}
                 onConfirmAttendance={() => handleConfirmAttendance(item.checkinId)}
                 onUndoAttendance={() => handleUndoAttendance(item.checkinId)}
                 onOpenAdvance={() => {
                   setAdvanceModalId(item.checkinId);
                   setSelectedDays([0]);
                 }}
-                onOpenRefund={() => setRefundTarget(item)}
+                onOpenRefund={() => handleOpenRefund(item)}
               />
             ))
           )}
@@ -439,7 +456,9 @@ export default function ReceptionCheckinPage() {
         <RefundModal
           person={{
             name: `${refundTarget.firstName || ""} ${refundTarget.lastName || ""}`,
-            amount: refundTarget.amountCharged,
+            // `balance` es el saldo real de la cuenta — la misma bolsa contra la que el backend
+            // valida `POST /api/personas/{id}/reembolso`.
+            amount: Math.max(0, Number(refundTarget.balance || 0)),
           }}
           onConfirm={handleConfirmRefund}
           onClose={() => {

@@ -311,7 +311,7 @@ nombre), no un solo click.
 | GET | `/api/horarios/excepciones/{id}` | CRUD | — | `ScheduleExceptionResponse` |
 | DELETE | `/api/horarios/excepciones/{id}` | CRUD | — | `204` |
 | POST | `/api/sesiones` | PERSONALIZADA — PSQL | `SessionRequest` | `SessionResponse` |
-| GET | `/api/sesiones?desde=&hasta=` | CRUD | — | `Page<SessionResponse>` |
+| GET | `/api/sesiones[?desde=&hasta=]` | CRUD | — | `Page<SessionResponse>` |
 | GET | `/api/sesiones/{id}` | CRUD | — | `SessionResponse` |
 | GET | `/api/sesiones/fecha/{fecha}` | CRUD | — | `SessionResponse[]` |
 | DELETE | `/api/sesiones/{id}` | PERSONALIZADA — PSQL | — | `SessionResponse` |

@@ -26,6 +26,7 @@ public class UserProcedureRepository {
                 .declareParameters(
                         new SqlParameter("p_persona_id", Types.INTEGER),
                         new SqlParameter("p_password_hash", Types.VARCHAR),
+                        new SqlParameter("p_correo", Types.VARCHAR),
                         new SqlOutParameter("p_usuario_id", Types.INTEGER)
                 );
     }
@@ -34,11 +35,15 @@ public class UserProcedureRepository {
      * sp_registrar_usuario_para_persona. Crea la cuenta y le asigna el rol MIEMBRO.
      * Recibe el hash ya calculado: la contraseña en claro nunca llega a la base de datos.
      * Deriva internamente el numero_documento de la persona asociada.
+     *
+     * @param email opcional; con null la cuenta se identifica solo por documento, que es lo que
+     *              permite chk_usuario_identificador. Es el caso normal en el kiosko.
      */
-    public Integer registerUserForPerson(Integer personId, String passwordHash) {
+    public Integer registerUserForPerson(Integer personId, String passwordHash, String email) {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("p_persona_id", personId)
-                .addValue("p_password_hash", passwordHash);
+                .addValue("p_password_hash", passwordHash)
+                .addValue("p_correo", email);
 
         return (Integer) registerUserForPersonCall.execute(params).get("p_usuario_id");
     }

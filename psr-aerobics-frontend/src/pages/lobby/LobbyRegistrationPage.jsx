@@ -6,6 +6,7 @@ import BirthDateField from "../../components/forms/BirthDateField";
 import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
 import { peopleService } from "../../services/peopleService";
 import { queueService } from "../../services/queueService";
+import { isValidDocumentNumber, isValidPhone } from "../../utils/validation";
 
 const inputClass =
   "w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3 text-white text-base placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors";
@@ -31,11 +32,15 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
   // Panel de confirmación antes del envío final (mejoras-frontend.md §1).
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
+  const documentoValid = isValidDocumentNumber(documento);
+  const phoneValid = isValidPhone(phone);
+
   const canSubmit =
-    documento.trim() &&
+    documentoValid &&
     firstName.trim() &&
     lastName.trim() &&
-    phone.trim() &&
+    phoneValid &&
     birthDate &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
@@ -186,6 +191,9 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
               {editingDocumento ? <Check size={16} /> : <Pencil size={14} />}
             </button>
           </div>
+          {documento && !documentoValid && (
+            <p className="text-amber-400 text-xs -mt-3 mb-4 text-right">Mínimo 6 dígitos.</p>
+          )}
 
           <div className="grid grid-cols-2 gap-4 mb-4">
             <Field label="Nombre">
@@ -208,16 +216,19 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <Field label="Teléfono">
-              <input
-                type="tel"
-                inputMode="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="300 123 4567"
-                className={inputClass}
-              />
-            </Field>
+            <div>
+              <Field label="Teléfono">
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="300 123 4567"
+                  className={inputClass}
+                />
+              </Field>
+              {phone && !phoneValid && <p className="text-amber-400 text-xs mt-1">Mínimo 10 dígitos.</p>}
+            </div>
             <Field label="Correo electrónico (opcional)" icon={<Mail size={14} />}>
               <input
                 type="email"

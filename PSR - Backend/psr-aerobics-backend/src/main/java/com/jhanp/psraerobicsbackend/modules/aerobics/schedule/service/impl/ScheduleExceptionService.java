@@ -9,6 +9,7 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.schedule.repository.Schedul
 import com.jhanp.psraerobicsbackend.modules.aerobics.schedule.service.interfaces.IScheduleExceptionService;
 import com.jhanp.psraerobicsbackend.shared.exception.DuplicateResourceException;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
+import com.jhanp.psraerobicsbackend.shared.validation.DateRanges;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -67,6 +68,7 @@ public class ScheduleExceptionService implements IScheduleExceptionService {
 
     @Override
     public List<ScheduleExceptionResponse> findBetween(LocalDate from, LocalDate to) {
+        DateRanges.require(from, to);
         return scheduleExceptionRepository.findByDateBetweenOrderByDateAsc(from, to).stream()
                 .map(scheduleExceptionMapper::toResponse)
                 .toList();

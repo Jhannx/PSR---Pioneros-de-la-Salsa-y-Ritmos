@@ -9,7 +9,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
+import com.jhanp.psraerobicsbackend.security.Authorities;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +27,9 @@ import java.time.OffsetDateTime;
  */
 @RestController
 @RequestMapping("/api/auditoria")
+// La auditoría es de administración: dice quién cambió qué, y eso incluye los cambios del propio
+// personal. Nadie más que ADMIN tiene por qué verla.
+@PreAuthorize(Authorities.ADMIN)
 @RequiredArgsConstructor
 @Validated
 public class ChangeHistoryController {

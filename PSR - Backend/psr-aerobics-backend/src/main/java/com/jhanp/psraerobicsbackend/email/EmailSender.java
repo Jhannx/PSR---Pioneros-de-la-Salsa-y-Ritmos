@@ -1,5 +1,7 @@
 package com.jhanp.psraerobicsbackend.email;
 
+import java.util.List;
+
 /**
  * Transporte de correo, sin ninguna noción del dominio: recibe un destinatario y un HTML ya armado.
  * Quién arma ese HTML —invitación, recuperación de contraseña— es asunto de la capa de arriba.
@@ -23,5 +25,19 @@ public interface EmailSender {
      * @param subject   asunto en texto plano
      * @param htmlBody  cuerpo en HTML
      */
-    void send(String toAddress, String toName, String subject, String htmlBody);
+    default void send(String toAddress, String toName, String subject, String htmlBody) {
+        send(toAddress, toName, subject, htmlBody, List.of());
+    }
+
+    /**
+     * Igual que {@link #send(String, String, String, String)} pero con archivos adjuntos.
+     * <p>
+     * Es el método que implementan los proveedores; el de cuatro argumentos delega aquí con la lista
+     * vacía. Así los tres correos que no llevan adjunto siguen escribiéndose igual que siempre y no
+     * hubo que tocarlos.
+     *
+     * @param attachments nunca null; lista vacía si no hay adjuntos
+     */
+    void send(String toAddress, String toName, String subject, String htmlBody,
+              List<EmailAttachment> attachments);
 }

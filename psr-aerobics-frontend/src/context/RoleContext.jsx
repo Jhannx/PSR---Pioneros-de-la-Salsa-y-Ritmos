@@ -68,6 +68,16 @@ function computeInitialRole(user) {
   return null;
 }
 
+// Usado desde `LoginPage` para decidir la redirección justo tras loguear, antes de que este
+// contexto tenga oportunidad de re-renderizar con el `user` nuevo (errores-12sep-front.md #6):
+// `LoginPage` navegaba directo a `state.from` (la ruta que expulsó al login) sin pasar nunca por
+// `needsRoleSelection`, así que una cuenta multirol volvía a la última URL protegida que visitó
+// en vez de al selector. Misma lógica que `computeInitialRole`, expuesta aparte para no duplicarla.
+export function needsRoleSelectionFor(user) {
+  const roles = user?.roles || [];
+  return roles.length > 1 && !computeInitialRole(user);
+}
+
 export function RoleProvider({ children }) {
   const { user } = useAuth();
   const [activeRole, setActiveRoleState] = useState(() => computeInitialRole(user));

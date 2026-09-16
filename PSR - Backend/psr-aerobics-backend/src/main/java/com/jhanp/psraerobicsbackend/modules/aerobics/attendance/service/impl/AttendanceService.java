@@ -11,9 +11,12 @@ import com.jhanp.psraerobicsbackend.modules.aerobics.attendance.repository.Atten
 import com.jhanp.psraerobicsbackend.modules.aerobics.attendance.repository.AttendanceProcedureRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.attendance.repository.AttendanceRepository;
 import com.jhanp.psraerobicsbackend.modules.aerobics.attendance.service.interfaces.IAttendanceService;
+import com.jhanp.psraerobicsbackend.modules.aerobics.queue.event.QueueChangedEvent;
 import com.jhanp.psraerobicsbackend.shared.exception.ResourceNotFoundException;
+import com.jhanp.psraerobicsbackend.shared.validation.DateRanges;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -38,6 +41,7 @@ public class AttendanceService implements IAttendanceService {
     private final AttendanceBalanceViewRepository attendanceBalanceViewRepository;
     private final AttendanceMapper attendanceMapper;
     private final AttendanceViewMapper attendanceViewMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional
@@ -52,6 +56,11 @@ public class AttendanceService implements IAttendanceService {
                         "La asistencia no quedó registrada para la llegada " + checkinId));
 
         log.info("Asistencia confirmada para la llegada ID: {} por el usuario ID: {}", checkinId, markedByUserId);
+
+        // sessionId va null a propósito: sacarlo obligaría a resolver dos relaciones LAZY solo para
+        // rellenar un dato que el cliente no necesita —recibe la señal y relee la vista que muestra.
+        eventPublisher.publishEvent(QueueChangedEvent.attendanceConfirmed(null));
+
         return attendanceMapper.toResponse(saved);
     }
 
@@ -60,6 +69,8 @@ public class AttendanceService implements IAttendanceService {
     public void cancel(Integer checkinId) {
         attendanceProcedureRepository.cancel(checkinId);
         log.info("Asistencia anulada para la llegada ID: {}", checkinId);
+
+        eventPublisher.publishEvent(QueueChangedEvent.attendanceCancelled(null));
     }
 
     @Override
@@ -102,6 +113,7 @@ public class AttendanceService implements IAttendanceService {
 
     @Override
     public Page<AttendanceHistoryViewResponse> getHistoryBetween(LocalDate from, LocalDate to, Pageable pageable) {
+        DateRanges.require(from, to);
         return attendanceHistoryViewRepository.findByDateBetweenOrderByDateDesc(from, to, pageable)
                 .map(attendanceViewMapper::toResponse);
     }

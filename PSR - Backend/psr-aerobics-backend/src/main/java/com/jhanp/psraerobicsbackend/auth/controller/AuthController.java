@@ -3,17 +3,14 @@ package com.jhanp.psraerobicsbackend.auth.controller;
 import com.jhanp.psraerobicsbackend.auth.dto.request.ChangePasswordRequest;
 import com.jhanp.psraerobicsbackend.auth.dto.request.ForgotPasswordRequest;
 import com.jhanp.psraerobicsbackend.auth.dto.request.LoginRequest;
-import com.jhanp.psraerobicsbackend.auth.dto.request.RegistrationRequest;
 import com.jhanp.psraerobicsbackend.auth.dto.request.ResetPasswordRequest;
 import com.jhanp.psraerobicsbackend.auth.dto.response.AuthResponse;
 import com.jhanp.psraerobicsbackend.auth.service.IAuthService;
 import com.jhanp.psraerobicsbackend.auth.service.IPasswordRecoveryService;
 import com.jhanp.psraerobicsbackend.auth.service.IPasswordResetService;
-import com.jhanp.psraerobicsbackend.common.dto.MessageResponse;
-import com.jhanp.psraerobicsbackend.modules.user.dto.response.UserResponse;
+import com.jhanp.psraerobicsbackend.shared.response.MessageResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -30,12 +27,6 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
-    }
-
-    /** Auto-registro público. Extra sobre el contrato: siempre crea un MIEMBRO. */
-    @PostMapping("/register")
-    public ResponseEntity<UserResponse> register(@Valid @RequestBody RegistrationRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
 
     /** Responde 200 con el mismo mensaje exista o no el correo. */
