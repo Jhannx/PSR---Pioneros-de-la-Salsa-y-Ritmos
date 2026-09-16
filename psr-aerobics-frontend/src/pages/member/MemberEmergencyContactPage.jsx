@@ -57,6 +57,12 @@ export default function MemberEmergencyContactPage({ onBack }) {
   const [savingHealth, setSavingHealth] = useState(false);
   const [healthError, setHealthError] = useState("");
   const [healthSaved, setHealthSaved] = useState(false);
+  // Consentimiento diferenciado y expreso para el dato sensible de salud
+  // (docs/pendiente-implementar-sistema.md §Frontend #3, política numeral 4.2) — distinto de la
+  // aceptación general del registro. Solo se exige si de verdad hay algo que guardar: "si la
+  // persona no marca la casilla, el registro continúa con normalidad" (numeral 4.2) — vaciar el
+  // campo (borrar lo que había) nunca requiere el checkbox.
+  const [healthConsent, setHealthConsent] = useState(false);
 
   useEffect(() => {
     if (!user?.personId) {
@@ -187,6 +193,7 @@ export default function MemberEmergencyContactPage({ onBack }) {
 
   const atLimit = contacts.length >= MAX_CONTACTS;
   const healthDirty = healthValueToSave !== savedHealthValue;
+  const needsHealthConsent = healthValueToSave.length > 0 && !healthConsent;
 
   if (loading) return <div className="min-h-screen bg-neutral-950 text-neutral-400 p-8">Cargando…</div>;
 
@@ -274,6 +281,14 @@ export default function MemberEmergencyContactPage({ onBack }) {
               {phoneTooShort && (
                 <p className="text-amber-400 text-xs -mt-1.5">Ingresa un número de teléfono válido.</p>
               )}
+              {/* Autorización de terceros (docs/pendiente-implementar-sistema.md §Frontend #4,
+                  política numeral 5) — el nombre y teléfono de acá son datos personales de otra
+                  persona, no de quien está registrado. Texto informativo, no checkbox: la
+                  política solo pide "mostrarlo" en el punto donde se capturan estos datos. */}
+              <p className="text-neutral-500 text-[11px] leading-relaxed -mt-1">
+                Al proporcionar estos datos, usted declara que está autorizado para suministrarlos
+                para esta finalidad, o que dispone de una base legítima para hacerlo.
+              </p>
               {addError && <p className="text-rose-400 text-xs">{addError}</p>}
               <div className="flex gap-2">
                 <button
@@ -337,6 +352,28 @@ export default function MemberEmergencyContactPage({ onBack }) {
             </div>
           </div>
 
+          {/* Consentimiento diferenciado y expreso (política numeral 4.2) — texto literal de la
+              política, distinto de la aceptación general del registro. */}
+          <div className="border border-neutral-800 rounded-xl px-4 py-3 bg-neutral-950/40">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={healthConsent}
+                onChange={(e) => setHealthConsent(e.target.checked)}
+                className="mt-0.5 w-4 h-4 shrink-0 accent-emerald-500 cursor-pointer"
+              />
+              <span className="text-neutral-300 text-xs leading-relaxed">
+                ¿Desea proporcionar información de salud relevante para la práctica segura de la
+                actividad?
+                <br />
+                <span className="text-neutral-500">
+                  Sí, autorizo expresamente su tratamiento. Entiendo que proporcionar esta
+                  información es opcional.
+                </span>
+              </span>
+            </label>
+          </div>
+
           {healthMode === "texto" ? (
             <textarea
               value={freeText}
@@ -378,6 +415,11 @@ export default function MemberEmergencyContactPage({ onBack }) {
             </div>
           )}
 
+          {needsHealthConsent && (
+            <p className="text-amber-400 text-xs">
+              Marca la casilla de autorización de arriba para poder guardar esta información.
+            </p>
+          )}
           {healthError && <p className="text-rose-400 text-xs">{healthError}</p>}
           {healthSaved && (
             <p className="text-emerald-400 text-xs flex items-center gap-1.5">
@@ -387,7 +429,7 @@ export default function MemberEmergencyContactPage({ onBack }) {
 
           <button
             onClick={handleSaveHealth}
-            disabled={!healthDirty || savingHealth}
+            disabled={!healthDirty || savingHealth || needsHealthConsent}
             className="w-full bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 active:scale-[0.98] transition-all text-neutral-950 font-bold py-3 rounded-xl"
           >
             {savingHealth ? "Guardando…" : healthDirty ? "Guardar observaciones" : "Guardado"}

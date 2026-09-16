@@ -4,6 +4,7 @@ import { CheckCircle2, CreditCard, KeyRound, Mail, Cake, LogIn, ArrowLeft } from
 import Field from "../../components/forms/Field";
 import BirthDateField from "../../components/forms/BirthDateField";
 import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
+import RegistrationConsent from "../../components/shared/RegistrationConsent";
 import { peopleService } from "../../services/peopleService";
 import { isValidDocumentNumber, isValidPhone } from "../../utils/validation";
 
@@ -28,6 +29,11 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
   // documento o el teléfono acá nadie más lo revisa antes de guardarlo, a diferencia del alta
   // que hace recepción.
   const [showConfirm, setShowConfirm] = useState(false);
+  // Aceptación general de la política + declaración de participación voluntaria
+  // (docs/pendiente-implementar-sistema.md §Frontend #2, política numeral 12) — ver
+  // RegistrationConsent.jsx para el porqué de dos casillas separadas.
+  const [acceptedPolicy, setAcceptedPolicy] = useState(false);
+  const [acceptedVoluntary, setAcceptedVoluntary] = useState(false);
 
   // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
   const documentoValid = isValidDocumentNumber(documento);
@@ -39,6 +45,8 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
     documentoValid &&
     phoneValid &&
     birthDate &&
+    acceptedPolicy &&
+    acceptedVoluntary &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
   async function handleSubmit() {
@@ -242,6 +250,13 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
               </>
             )}
           </div>
+
+          <RegistrationConsent
+            acceptedPolicy={acceptedPolicy}
+            onAcceptedPolicyChange={setAcceptedPolicy}
+            acceptedVoluntary={acceptedVoluntary}
+            onAcceptedVoluntaryChange={setAcceptedVoluntary}
+          />
         </div>
 
         <button

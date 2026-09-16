@@ -4,7 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { ROLE_LABELS, ROLE_BADGE_STYLES } from "../../context/mockDataConstants";
 import { peopleService } from "../../services/peopleService";
 import { authService } from "../../services/authService";
-import { User, Phone, Mail, Shield, CheckCircle2, Lock, ChevronRight, Cake } from "lucide-react";
+import { User, Phone, Mail, Shield, CheckCircle2, Lock, ChevronRight, Cake, Download, FileWarning } from "lucide-react";
 
 const inputClass =
   "w-full bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-2.5 text-white placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors text-sm";
@@ -46,6 +46,57 @@ export default function UserProfilePage() {
   const [requestingEmailChange, setRequestingEmailChange] = useState(false);
   const [emailChangeError, setEmailChangeError] = useState("");
   const [emailChangeSent, setEmailChangeSent] = useState(false);
+
+  // Descarga de los propios datos (docs/pendiente-implementar-sistema.md §Frontend #5): hoy solo
+  // un ADMIN podía consultar esto manualmente. Se agrega el que ya está viendo/editando arriba
+  // (perfil) más contacto de emergencia y saldo — con esto quedan cubiertas identificación, salud
+  // (viaja dentro del perfil), terceros y financiero (política numeral 2), sin necesitar un
+  // endpoint nuevo: son los mismos tres que ya autoriza la política a "la propia persona titular"
+  // (numeral 6). Ensamblado en el navegador, no en el backend — no hay endpoint de exportación.
+  const [downloadingData, setDownloadingData] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
+
+  async function handleDownloadMyData() {
+    if (!user?.personId || downloadingData) return;
+    setDownloadingData(true);
+    setDownloadError("");
+    try {
+      const [profileRes, contactsRes, balanceRes] = await Promise.allSettled([
+        peopleService.getProfile(user.personId),
+        peopleService.getEmergencyContacts(user.personId),
+        peopleService.getBalance(user.personId),
+      ]);
+      const payload = {
+        generadoEl: new Date().toISOString(),
+        perfil: profileRes.status === "fulfilled" ? profileRes.value : null,
+        contactosEmergencia: contactsRes.status === "fulfilled" ? contactsRes.value : [],
+        saldo: balanceRes.status === "fulfilled" ? balanceRes.value : null,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `mis-datos-psr-${TODAY_ISO}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDownloadError(err.data?.message || err.message || "No fue posible generar la descarga.");
+    } finally {
+      setDownloadingData(false);
+    }
+  }
+
+  // Corrección o supresión (docs/pendiente-implementar-sistema.md §Frontend #6): sin endpoint ni
+  // proceso manual definido todavía (§Backend #8), así que el único punto de entrada honesto es
+  // el canal de contacto de la política (numeral 1) — un mailto pre-llenado, no un formulario que
+  // aparente someterse a algún proceso que hoy no existe.
+  const correctionMailto = `mailto:escuelapsr@gmail.com?subject=${encodeURIComponent(
+    "Solicitud de corrección o supresión de datos personales"
+  )}&body=${encodeURIComponent(
+    `Nombre: ${formData.firstName} ${formData.lastName}\nDocumento: ${formData.documentType} ${formData.documentNumber}\n\nDescribe aquí qué deseas corregir o que se elimine:\n`
+  )}`;
 
   useEffect(() => {
     if (!user?.personId) return;
@@ -351,6 +402,55 @@ export default function UserProfilePage() {
           </div>
           <ChevronRight size={18} className="text-neutral-500" />
         </button>
+
+        {/* Descarga de los propios datos — política numeral 6 y 10 (derecho a conocer los datos
+            que PSR tiene sobre uno). */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 space-y-3">
+          <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-neutral-800 pb-3">
+            <Download size={18} className="text-emerald-400" />
+            <span>Mis Datos</span>
+          </h3>
+          <p className="text-neutral-400 text-xs">
+            Ya puedes ver tu información personal arriba y tu contacto de emergencia en su propia
+            pantalla. Si necesitas todo junto en un archivo (perfil, contacto de emergencia y
+            saldo), descárgalo acá.
+          </p>
+          {downloadError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl">
+              {downloadError}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleDownloadMyData}
+            disabled={downloadingData || !user?.personId}
+            className="flex items-center gap-2 bg-neutral-800 disabled:opacity-40 hover:bg-neutral-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors"
+          >
+            <Download size={14} />
+            {downloadingData ? "Generando..." : "Descargar mis datos (JSON)"}
+          </button>
+        </div>
+
+        {/* Corrección o supresión — política numeral 10 (derecho a rectificar/suprimir). Sin
+            canal automatizado todavía (docs/pendiente-implementar-sistema.md §Backend #8): el
+            enlace escribe al mismo correo de contacto de la política, no a un formulario. */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 space-y-3">
+          <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-neutral-800 pb-3">
+            <FileWarning size={18} className="text-emerald-400" />
+            <span>Corrección o Supresión de Datos</span>
+          </h3>
+          <p className="text-neutral-400 text-xs">
+            Si algún dato tuyo está mal o quieres pedir que se elimine, escríbenos directamente.
+            Respondemos según los plazos que fija la Ley 1581 de 2012.
+          </p>
+          <a
+            href={correctionMailto}
+            className="inline-flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors"
+          >
+            <Mail size={14} />
+            Solicitar corrección o supresión
+          </a>
+        </div>
 
         {/* Cambiar contraseña */}
         <form onSubmit={handleChangePassword} className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 space-y-4">

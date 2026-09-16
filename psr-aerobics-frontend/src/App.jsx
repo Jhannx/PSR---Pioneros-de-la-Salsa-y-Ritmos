@@ -13,6 +13,7 @@ import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
 import ConfirmEmailChangePage from "./pages/auth/ConfirmEmailChangePage";
 import RoleSelectorPage from "./pages/auth/RoleSelectorPage";
 import SelfRegistrationPage from "./pages/public/SelfRegistrationPage";
+import PrivacyPolicyPage from "./pages/public/PrivacyPolicyPage";
 
 // Páginas de la Terminal PSR / Entrada
 import LobbyCheckinPage from "./pages/lobby/LobbyCheckinPage";
@@ -68,6 +69,10 @@ export default function App() {
             <Route path="/confirmar-correo" element={<ConfirmEmailChangePage />} />
             <Route path="/register" element={<SelfRegistrationPage />} />
             <Route path="/member/register" element={<MemberRegistrationPage />} />
+            {/* Pública a propósito, igual que /register: el checkbox de aceptación del registro
+                enlaza acá antes de que la persona tenga cuenta (docs/pendiente-implementar-
+                sistema.md §Frontend #1). */}
+            <Route path="/politica-privacidad" element={<PrivacyPolicyPage />} />
 
             {/* Selector de rol — fuera de AppLayout a propósito: es una pantalla de tránsito
                 (justo tras loguear, o al cambiar de rol desde el sidebar), sin sidebar propio.
