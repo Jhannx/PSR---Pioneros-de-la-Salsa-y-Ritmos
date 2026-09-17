@@ -9,6 +9,13 @@
 // LobbyRegistrationPage (los dos flujos de autoregistro digital). No aplica a PersonFormModal —
 // el alta que hace recepción usa un formato físico firmado en vez del checkbox digital
 // (docs/pendiente-implementar-sistema.md, "Decisiones de negocio pendientes" #2).
+//
+// El texto legal sale de constants/policyExcerpts.js (fuente única, compartida con
+// PrivacyPolicyPage.jsx y MissingConsentPanel.jsx) — el del primer checkbox se queda escrito
+// acá porque necesita el enlace incrustado a mitad de frase, algo que un string plano no puede
+// representar; el `href` sí usa el ancla real en vez de un valor suelto.
+import { POLICY_EXCERPTS } from "../../constants/policyExcerpts";
+
 export default function RegistrationConsent({
   acceptedPolicy,
   onAcceptedPolicyChange,
@@ -27,7 +34,7 @@ export default function RegistrationConsent({
         <span className="text-neutral-400 text-xs leading-relaxed">
           He leído y acepto la{" "}
           <a
-            href="/politica-privacidad"
+            href={`/politica-privacidad#${POLICY_EXCERPTS.dataProcessing.anchor}`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
@@ -46,8 +53,7 @@ export default function RegistrationConsent({
           className="mt-0.5 w-4 h-4 shrink-0 accent-emerald-500 cursor-pointer"
         />
         <span className="text-neutral-400 text-xs leading-relaxed">
-          Entiendo que la actividad física conlleva riesgo de lesión y participo de manera
-          voluntaria.
+          {POLICY_EXCERPTS.voluntaryParticipation.checkboxLabel}
         </span>
       </label>
     </div>

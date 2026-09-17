@@ -63,6 +63,8 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
         email: email.trim() || undefined,
         birthDate,
         password: passwordMode === "documento" ? null : password,
+        dataProcessingConsent: acceptedPolicy,
+        voluntaryParticipationConsent: acceptedVoluntary,
       });
       setShowConfirm(false);
       setSubmitted(true);

@@ -19,12 +19,19 @@ export const peopleService = {
   },
 
   create: async (data) => {
-    // PersonRequest: { documentType, documentNumber, firstName, lastName, phone }
+    // PersonRequest: { documentType, documentNumber, firstName, lastName, phone,
+    // signedPhysicalConsent }. El alta manual de recepción no pasa por ningún checkbox
+    // digital — signedPhysicalConsent es la confirmación de quien atiende el mostrador de que
+    // tiene el formato físico firmado delante, no la aceptación de la persona registrada
+    // (NOTAS-PARA-FRONTEND.md §2). Sin él, 400.
     return await apiClient.post("/api/personas", data);
   },
 
   autoRegister: async (data) => {
-    // PersonRequest: { documentType, documentNumber, firstName, lastName, phone }
+    // PersonRequest: { documentType, documentNumber, firstName, lastName, phone,
+    // dataProcessingConsent, voluntaryParticipationConsent } — los dos checkboxes de
+    // RegistrationConsent.jsx (numerales 4.1 y 12). Cualquiera en false/null/ausente, 400
+    // (NOTAS-PARA-FRONTEND.md §1).
     return await apiClient.post("/api/personas/autoregistro", data);
   },
 
@@ -66,11 +73,15 @@ export const peopleService = {
   },
 
   createEmergencyContact: async (personId, data) => {
-    // EmergencyContactRequest: { name, phone } — ya no lleva `observations`, eso se mudó a
-    // observaciones de salud de la persona (ver updateHealthObservations más abajo). Al menos
-    // uno de los dos campos debe venir, o el backend responde 400. El sexto contacto responde
-    // 409 — el frontend deshabilita "agregar" al llegar a 5 sin depender de este error, pero se
-    // sigue manejando por si dos pestañas agregan a la vez.
+    // EmergencyContactRequest: { name, phone, thirdPartyConsent } — ya no lleva `observations`,
+    // eso se mudó a observaciones de salud de la persona (ver updateHealthObservations más
+    // abajo). Al menos uno de name/phone debe venir, o el backend responde 400. El sexto
+    // contacto responde 409 — el frontend deshabilita "agregar" al llegar a 5 sin depender de
+    // este error, pero se sigue manejando por si dos pestañas agregan a la vez.
+    // `thirdPartyConsent` (numeral 5) se exige en TODA llamada, sin excepción — cada contacto es
+    // una persona distinta, no hay "ya lo dio antes" que valga para el siguiente
+    // (NOTAS-PARA-FRONTEND.md §4). Sin él, 400. Solo aplica al crear: `updateEmergencyContact`
+    // no lo pide ni lo usa.
     return await apiClient.post(`/api/personas/${personId}/contactos-emergencia`, data);
   },
 
@@ -88,8 +99,23 @@ export const peopleService = {
   // abrirlo al propio miembro para una nota de salud le dejaría también cambiar su documento.
   // `null` y cadena vacía son válidos (borrar lo escrito es legítimo), máx. 2000 caracteres.
   // Devuelve el PersonResponse completo, no solo el campo.
-  updateHealthObservations: async (personId, healthObservations) => {
-    return await apiClient.put(`/api/personas/${personId}/observaciones-salud`, { healthObservations });
+  //
+  // `healthDataConsent` (numeral 4.2) es obligatorio en `true` cuando `healthObservations` no
+  // está vacío — 400 si no viene. Al vaciar el campo se ignora, se puede mandar lo que sea
+  // (NOTAS-PARA-FRONTEND.md §3): vaciar revoca el consentimiento, no lo exige.
+  updateHealthObservations: async (personId, healthObservations, healthDataConsent) => {
+    return await apiClient.put(`/api/personas/${personId}/observaciones-salud`, {
+      healthObservations,
+      healthDataConsent,
+    });
+  },
+
+  // Estado y bitácora de consentimientos — numeral 10 (derecho a saber qué se autorizó y
+  // cuándo). Permisos: personal, o la propia persona. `registrationConsentMissing` solo puede
+  // ser `true` en cuentas de antes de este mecanismo; con la app recién desplegada no debería
+  // aparecer nunca, pero el shape de la respuesta lo incluye igual (NOTAS-PARA-FRONTEND.md §GET).
+  getConsents: async (personId) => {
+    return await apiClient.get(`/api/personas/${personId}/consentimientos`);
   },
 
   deactivate: async (id) => {

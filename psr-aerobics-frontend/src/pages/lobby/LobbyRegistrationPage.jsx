@@ -66,6 +66,8 @@ export default function LobbyRegistrationPage({ activityName = "Aeróbicos" }) {
         email: email.trim() || undefined,
         birthDate,
         password: passwordMode === "documento" ? null : password,
+        dataProcessingConsent: acceptedPolicy,
+        voluntaryParticipationConsent: acceptedVoluntary,
       });
 
       try {

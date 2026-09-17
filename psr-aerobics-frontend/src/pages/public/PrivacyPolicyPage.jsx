@@ -297,9 +297,12 @@ export default function PrivacyPolicyPage() {
   );
 }
 
+// `id` sigue el mismo valor que `anchor` en constants/policyExcerpts.js — así los paneles de
+// consentimiento y los checkboxes de registro pueden enlazar directo a la sección exacta
+// (`/politica-privacidad#numeral-5`, etc.) en vez de mandar solo a la página completa.
 function Section({ n, title, children }) {
   return (
-    <section>
+    <section id={`numeral-${n}`} className="scroll-mt-6">
       <h2 className="text-lg font-bold text-white mb-3 flex items-baseline gap-2">
         <span className="text-emerald-400">{n}.</span> {title}
       </h2>

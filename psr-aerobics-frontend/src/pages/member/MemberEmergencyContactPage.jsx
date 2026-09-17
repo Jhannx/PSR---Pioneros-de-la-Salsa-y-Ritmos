@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Phone, User, MessageSquareText, Tags, CheckCircle2, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import Field from "../../components/forms/Field";
+import MissingConsentPanel from "../../components/shared/MissingConsentPanel";
 import { useAuth } from "../../context/AuthContext";
 import { peopleService } from "../../services/peopleService";
 import { isValidEmergencyContactPhone } from "../../utils/validation";
+import { POLICY_EXCERPTS } from "../../constants/policyExcerpts";
 
 const CONDITION_CHIPS = [
   "Asma",
@@ -46,6 +48,15 @@ export default function MemberEmergencyContactPage({ onBack }) {
   const [addError, setAddError] = useState("");
   const [removingId, setRemovingId] = useState(null);
   const [removeError, setRemoveError] = useState("");
+  // Autorización de terceros (docs/pendiente-implementar-sistema.md §Frontend #4, política
+  // numeral 5) — el nombre y teléfono de acá son datos personales de OTRA persona, no de quien
+  // está registrado. Cada contacto nuevo es una declaración distinta, se pide de nuevo por cada
+  // uno, siempre — nunca se recuerda de un contacto al siguiente.
+  //
+  // El panel con la cita literal solo aparece al intentar "Agregar" (no mientras se escribe
+  // nombre/teléfono) — `thirdPartyConsentPanelOpen` es lo que controla esa revelación.
+  const [thirdPartyConsent, setThirdPartyConsent] = useState(false);
+  const [thirdPartyConsentPanelOpen, setThirdPartyConsentPanelOpen] = useState(false);
 
   // Observaciones de salud — de la persona, no de un contacto. Modo texto/chips igual que antes,
   // pero lo que se guarda ya no depende de si hay contactos o no.
@@ -61,8 +72,16 @@ export default function MemberEmergencyContactPage({ onBack }) {
   // (docs/pendiente-implementar-sistema.md §Frontend #3, política numeral 4.2) — distinto de la
   // aceptación general del registro. Solo se exige si de verdad hay algo que guardar: "si la
   // persona no marca la casilla, el registro continúa con normalidad" (numeral 4.2) — vaciar el
-  // campo (borrar lo que había) nunca requiere el checkbox.
+  // campo (borrar lo que había) nunca requiere el checkbox, y de hecho revoca el consentimiento
+  // que hubiera (NOTAS-PARA-FRONTEND.md §3).
+  //
+  // A diferencia de terceros, esto se pide UNA sola vez: `savedHealthValue` (lo que ya vino del
+  // perfil, o lo último confirmado por el servidor) es la prueba de que ya se dio antes — si no
+  // está vacío, el backend no lo habría aceptado sin consentimiento. Mientras haya algo guardado,
+  // no se vuelve a preguntar; solo reaparece si se vacía el campo y se quiere volver a escribir
+  // algo (eso sí cuenta como "primera vez" otra vez, porque vaciar ya revocó lo anterior).
   const [healthConsent, setHealthConsent] = useState(false);
+  const [healthConsentPanelOpen, setHealthConsentPanelOpen] = useState(false);
 
   useEffect(() => {
     if (!user?.personId) {
@@ -144,14 +163,20 @@ export default function MemberEmergencyContactPage({ onBack }) {
   async function handleAddContact() {
     const name = newName.trim();
     const phone = newPhone.trim();
-    if (!phoneValid) return;
+    if (!phoneValid || !thirdPartyConsent) return;
     setSavingContact(true);
     setAddError("");
     try {
-      const created = await peopleService.createEmergencyContact(user.personId, { name, phone });
+      const created = await peopleService.createEmergencyContact(user.personId, {
+        name,
+        phone,
+        thirdPartyConsent,
+      });
       setContacts((prev) => [...prev, created]);
       setNewName("");
       setNewPhone("");
+      setThirdPartyConsent(false);
+      setThirdPartyConsentPanelOpen(false);
       setAddingContact(false);
     } catch (err) {
       // 409 = ya hay 5 — no debería llegarse acá porque el botón se deshabilita antes, pero se
@@ -160,6 +185,19 @@ export default function MemberEmergencyContactPage({ onBack }) {
     } finally {
       setSavingContact(false);
     }
+  }
+
+  // Deja escribir nombre/teléfono con libertad — el panel de autorización de terceros solo
+  // aparece al intentar agregar, no antes. Primer clic revela el panel; con la casilla marcada,
+  // el mismo botón (ya con otra etiqueta) sí dispara `handleAddContact`.
+  function handleAddContactClick() {
+    if (!phoneValid || savingContact) return;
+    if (!thirdPartyConsentPanelOpen) {
+      setThirdPartyConsentPanelOpen(true);
+      return;
+    }
+    if (!thirdPartyConsent) return;
+    handleAddContact();
   }
 
   async function handleRemoveContact(contactId) {
@@ -180,8 +218,17 @@ export default function MemberEmergencyContactPage({ onBack }) {
     setHealthError("");
     setHealthSaved(false);
     try {
-      await peopleService.updateHealthObservations(user.personId, healthValueToSave || null);
+      // Si hay contenido, para llegar hasta aquí ya se garantizó consentimiento (o ya estaba
+      // dado de antes — `alreadyConsentedHealth` —, o se acaba de marcar en el panel). Vaciar
+      // nunca lo necesita; el backend lo ignora en ese caso.
+      await peopleService.updateHealthObservations(
+        user.personId,
+        healthValueToSave || null,
+        healthValueToSave.length > 0
+      );
       setSavedHealthValue(healthValueToSave);
+      setHealthConsentPanelOpen(false);
+      setHealthConsent(false);
       setHealthSaved(true);
       setTimeout(() => setHealthSaved(false), 3000);
     } catch (err) {
@@ -191,9 +238,28 @@ export default function MemberEmergencyContactPage({ onBack }) {
     }
   }
 
+  // Deja escribir/elegir libremente — el panel del numeral 4.2 solo aparece al intentar
+  // guardar, y solo si de verdad es la primera vez (o después de haber vaciado el campo antes).
+  function handleSaveHealthClick() {
+    if (!healthDirty || savingHealth) return;
+    if (healthConsentNeeded) {
+      if (!healthConsentPanelOpen) {
+        setHealthConsentPanelOpen(true);
+        return;
+      }
+      if (!healthConsent) return;
+    }
+    handleSaveHealth();
+  }
+
   const atLimit = contacts.length >= MAX_CONTACTS;
   const healthDirty = healthValueToSave !== savedHealthValue;
-  const needsHealthConsent = healthValueToSave.length > 0 && !healthConsent;
+  // Prueba de que el consentimiento de salud ya existe: si ya hay algo guardado en el servidor,
+  // el backend no lo habría aceptado sin `healthDataConsent: true` antes — no hace falta
+  // volver a preguntar. Solo se pide de nuevo si se vació el campo (eso revoca) y se quiere
+  // escribir algo distinto de nuevo.
+  const alreadyConsentedHealth = savedHealthValue.trim().length > 0;
+  const healthConsentNeeded = healthValueToSave.length > 0 && !alreadyConsentedHealth;
 
   if (loading) return <div className="min-h-screen bg-neutral-950 text-neutral-400 p-8">Cargando…</div>;
 
@@ -283,12 +349,16 @@ export default function MemberEmergencyContactPage({ onBack }) {
               )}
               {/* Autorización de terceros (docs/pendiente-implementar-sistema.md §Frontend #4,
                   política numeral 5) — el nombre y teléfono de acá son datos personales de otra
-                  persona, no de quien está registrado. Texto informativo, no checkbox: la
-                  política solo pide "mostrarlo" en el punto donde se capturan estos datos. */}
-              <p className="text-neutral-500 text-[11px] leading-relaxed -mt-1">
-                Al proporcionar estos datos, usted declara que está autorizado para suministrarlos
-                para esta finalidad, o que dispone de una base legítima para hacerlo.
-              </p>
+                  persona, no de quien está registrado. Solo aparece al intentar "Agregar", no
+                  mientras se escribe; se pide de nuevo en cada contacto, sin excepción. */}
+              {thirdPartyConsentPanelOpen && (
+                <MissingConsentPanel
+                  excerpt={POLICY_EXCERPTS.thirdParty}
+                  context="agregar este contacto"
+                  checked={thirdPartyConsent}
+                  onChange={setThirdPartyConsent}
+                />
+              )}
               {addError && <p className="text-rose-400 text-xs">{addError}</p>}
               <div className="flex gap-2">
                 <button
@@ -297,18 +367,20 @@ export default function MemberEmergencyContactPage({ onBack }) {
                     setAddError("");
                     setNewName("");
                     setNewPhone("");
+                    setThirdPartyConsent(false);
+                    setThirdPartyConsentPanelOpen(false);
                   }}
                   className="flex-1 border border-neutral-700 text-neutral-300 hover:bg-neutral-800 font-semibold py-2.5 rounded-xl transition-colors text-sm"
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={handleAddContact}
-                  disabled={!phoneValid || savingContact}
+                  onClick={handleAddContactClick}
+                  disabled={!phoneValid || savingContact || (thirdPartyConsentPanelOpen && !thirdPartyConsent)}
                   title={!phoneValid ? "Ingresa un número de teléfono válido" : undefined}
                   className="flex-1 bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 text-neutral-950 font-bold py-2.5 rounded-xl transition-colors text-sm"
                 >
-                  {savingContact ? "Agregando…" : "Agregar"}
+                  {savingContact ? "Agregando…" : thirdPartyConsentPanelOpen ? "Confirmar y agregar" : "Agregar"}
                 </button>
               </div>
             </div>
@@ -352,28 +424,6 @@ export default function MemberEmergencyContactPage({ onBack }) {
             </div>
           </div>
 
-          {/* Consentimiento diferenciado y expreso (política numeral 4.2) — texto literal de la
-              política, distinto de la aceptación general del registro. */}
-          <div className="border border-neutral-800 rounded-xl px-4 py-3 bg-neutral-950/40">
-            <label className="flex items-start gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={healthConsent}
-                onChange={(e) => setHealthConsent(e.target.checked)}
-                className="mt-0.5 w-4 h-4 shrink-0 accent-emerald-500 cursor-pointer"
-              />
-              <span className="text-neutral-300 text-xs leading-relaxed">
-                ¿Desea proporcionar información de salud relevante para la práctica segura de la
-                actividad?
-                <br />
-                <span className="text-neutral-500">
-                  Sí, autorizo expresamente su tratamiento. Entiendo que proporcionar esta
-                  información es opcional.
-                </span>
-              </span>
-            </label>
-          </div>
-
           {healthMode === "texto" ? (
             <textarea
               value={freeText}
@@ -415,10 +465,16 @@ export default function MemberEmergencyContactPage({ onBack }) {
             </div>
           )}
 
-          {needsHealthConsent && (
-            <p className="text-amber-400 text-xs">
-              Marca la casilla de autorización de arriba para poder guardar esta información.
-            </p>
+          {/* Consentimiento diferenciado y expreso (política numeral 4.2) — solo aparece al
+              intentar guardar, y solo si de verdad hace falta (ver `healthConsentNeeded`). Una
+              vez dado, no se vuelve a mostrar mientras haya algo guardado. */}
+          {healthConsentNeeded && healthConsentPanelOpen && (
+            <MissingConsentPanel
+              excerpt={POLICY_EXCERPTS.health}
+              context="guardar tus observaciones de salud"
+              checked={healthConsent}
+              onChange={setHealthConsent}
+            />
           )}
           {healthError && <p className="text-rose-400 text-xs">{healthError}</p>}
           {healthSaved && (
@@ -428,11 +484,17 @@ export default function MemberEmergencyContactPage({ onBack }) {
           )}
 
           <button
-            onClick={handleSaveHealth}
-            disabled={!healthDirty || savingHealth || needsHealthConsent}
+            onClick={handleSaveHealthClick}
+            disabled={!healthDirty || savingHealth || (healthConsentPanelOpen && !healthConsent)}
             className="w-full bg-emerald-500 disabled:opacity-40 hover:bg-emerald-400 active:scale-[0.98] transition-all text-neutral-950 font-bold py-3 rounded-xl"
           >
-            {savingHealth ? "Guardando…" : healthDirty ? "Guardar observaciones" : "Guardado"}
+            {savingHealth
+              ? "Guardando…"
+              : healthConsentPanelOpen
+                ? "Confirmar y guardar"
+                : healthDirty
+                  ? "Guardar observaciones"
+                  : "Guardado"}
           </button>
         </div>
 

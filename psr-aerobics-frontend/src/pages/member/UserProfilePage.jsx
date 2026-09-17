@@ -61,16 +61,20 @@ export default function UserProfilePage() {
     setDownloadingData(true);
     setDownloadError("");
     try {
-      const [profileRes, contactsRes, balanceRes] = await Promise.allSettled([
+      const [profileRes, contactsRes, balanceRes, consentsRes] = await Promise.allSettled([
         peopleService.getProfile(user.personId),
         peopleService.getEmergencyContacts(user.personId),
         peopleService.getBalance(user.personId),
+        peopleService.getConsents(user.personId),
       ]);
       const payload = {
         generadoEl: new Date().toISOString(),
         perfil: profileRes.status === "fulfilled" ? profileRes.value : null,
         contactosEmergencia: contactsRes.status === "fulfilled" ? contactsRes.value : [],
         saldo: balanceRes.status === "fulfilled" ? balanceRes.value : null,
+        // Qué autorizó y cuándo (numeral 10) — incluye el histórico completo que devuelva el
+        // backend, no solo el estado actual.
+        consentimientos: consentsRes.status === "fulfilled" ? consentsRes.value : null,
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -412,8 +416,8 @@ export default function UserProfilePage() {
           </h3>
           <p className="text-neutral-400 text-xs">
             Ya puedes ver tu información personal arriba y tu contacto de emergencia en su propia
-            pantalla. Si necesitas todo junto en un archivo (perfil, contacto de emergencia y
-            saldo), descárgalo acá.
+            pantalla. Si necesitas todo junto en un archivo (perfil, contacto de emergencia,
+            saldo, y qué autorizaste y cuándo), descárgalo acá.
           </p>
           {downloadError && (
             <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl">

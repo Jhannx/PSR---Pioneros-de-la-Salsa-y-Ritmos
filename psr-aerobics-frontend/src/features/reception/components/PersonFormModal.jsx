@@ -11,6 +11,11 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
   const [phone, setPhone] = useState(person?.phone || "");
   const [email, setEmail] = useState(person?.email || "");
   const [birthDate, setBirthDate] = useState(person?.birthDate || "");
+  // Confirmación de que recepción tiene el formato físico de autorización firmado — no es el
+  // checkbox digital de la política, es quien atiende el mostrador certificando un hecho físico
+  // (NOTAS-PARA-FRONTEND.md §2). Solo aplica al crear: editar un dato de alguien que ya está
+  // registrado no vuelve a suministrar nada nuevo.
+  const [signedPhysicalConsent, setSignedPhysicalConsent] = useState(false);
 
   // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
   // El teléfono sigue siendo opcional en esta pantalla (igual que antes), pero si se escribe algo
@@ -26,7 +31,7 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
     lastName.trim() &&
     documentoValid &&
     phoneValid &&
-    (mode === "edit" || birthDate);
+    (mode === "edit" || (birthDate && signedPhysicalConsent));
 
   function handleSave() {
     if (!canSave) return;
@@ -38,6 +43,7 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
       phone: phone.trim(),
       email: email.trim() || null,
       birthDate: birthDate || null,
+      ...(mode === "add" ? { signedPhysicalConsent } : {}),
     });
   }
 
@@ -147,9 +153,24 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
         </div>
 
         {mode === "add" && (
-          <p className="text-neutral-500 text-xs mb-4">
-            Se crea con contraseña por defecto igual a su número de documento. Los roles se asignan luego desde "Roles y Accesos".
-          </p>
+          <>
+            <p className="text-neutral-500 text-xs mb-4">
+              Se crea con contraseña por defecto igual a su número de documento. Los roles se asignan luego desde "Roles y Accesos".
+            </p>
+
+            <label className="flex items-start gap-2.5 cursor-pointer mb-4 -mt-1">
+              <input
+                type="checkbox"
+                checked={signedPhysicalConsent}
+                onChange={(e) => setSignedPhysicalConsent(e.target.checked)}
+                className="mt-0.5 w-4 h-4 shrink-0 accent-emerald-500 cursor-pointer"
+              />
+              <span className="text-neutral-400 text-xs leading-relaxed">
+                Confirmo que tengo el formato físico de autorización de tratamiento de datos
+                firmado por esta persona.
+              </span>
+            </label>
+          </>
         )}
 
         {/* El error de guardar vivía solo en la página de atrás, que este modal tapa por
