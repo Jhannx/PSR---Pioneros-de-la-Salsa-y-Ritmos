@@ -10,6 +10,17 @@ import { toLocalDateString } from "../utils/date";
 
 const DataContext = createContext(null);
 
+// Mismo rango (7 días atrás, 7 adelante) que ya usaba `refreshData` — extraído para que
+// `refreshSessions` (abajo) no repita el cálculo. Ver el comentario donde se usaba antes.
+function getSessionsDateRange() {
+  const today = new Date();
+  const desde = new Date(today);
+  desde.setDate(desde.getDate() - 7);
+  const hasta = new Date(today);
+  hasta.setDate(hasta.getDate() + 7);
+  return { desde: toLocalDateString(desde), hasta: toLocalDateString(hasta) };
+}
+
 export function DataProvider({ children }) {
   const { isAuthenticated } = useAuth();
   const [people, setPeople] = useState([]);
@@ -35,16 +46,12 @@ export function DataProvider({ children }) {
       // Rango real (7 días atrás, 7 adelante) en vez de pedir sin filtro — sin esto, la sesión de
       // HOY podía caer en una página que nunca se pedía (RESPUESTA-NOTAS-FINAL.md #2: sin
       // parámetros es un histórico completo ordenado por fecha descendente, paginado de 20 en 20).
-      const today = new Date();
-      const desde = new Date(today);
-      desde.setDate(desde.getDate() - 7);
-      const hasta = new Date(today);
-      hasta.setDate(hasta.getDate() + 7);
+      const { desde, hasta } = getSessionsDateRange();
 
       const [peopleRes, queueRes, sessionsRes] = await Promise.allSettled([
         peopleService.getAll(),
         queueService.getAdminQueue(),
-        sessionsService.getSessions(toLocalDateString(desde), toLocalDateString(hasta)),
+        sessionsService.getSessions(desde, hasta),
       ]);
 
       if (peopleRes.status === "fulfilled") {
@@ -79,6 +86,25 @@ export function DataProvider({ children }) {
       setQueue(Array.isArray(qData) ? qData : qData?.content || []);
     } catch (err) {
       console.warn("No se pudo refrescar la cola de admin:", err);
+    }
+  }, []);
+
+  // `sessions` solo se pedía una vez, en `refreshData`, al montar el provider — que envuelve toda
+  // la app y nunca se desmonta al navegar entre pantallas. Sin esto, nada volvía a pedir sesiones
+  // nunca: una sesión creada por el barrido del servidor (o por otra persona, en otra pestaña) se
+  // quedaba invisible hasta recargar la página entera, y eso es buena parte de "las sesiones
+  // cargan de forma errática" (docs/correcciones-pendientes-18-09.md #7) — la cola sí se
+  // refrescaba sola por WebSocket, las sesiones no tenían ningún mecanismo equivalente. A
+  // diferencia de `refreshQueue`, no hay WebSocket para sesiones todavía, así que quien necesite
+  // datos frescos (SessionsPage al montar, SchedulePage tras crear/editar un horario) debe
+  // llamarlo explícitamente.
+  const refreshSessions = useCallback(async () => {
+    try {
+      const { desde, hasta } = getSessionsDateRange();
+      const sData = await sessionsService.getSessions(desde, hasta);
+      setSessions(Array.isArray(sData) ? sData : sData?.content || []);
+    } catch (err) {
+      console.warn("No se pudo refrescar las sesiones:", err);
     }
   }, []);
 
@@ -256,6 +282,7 @@ export function DataProvider({ children }) {
         error,
         refreshData,
         refreshQueue,
+        refreshSessions,
         addPerson,
         updatePerson,
         deactivatePerson,

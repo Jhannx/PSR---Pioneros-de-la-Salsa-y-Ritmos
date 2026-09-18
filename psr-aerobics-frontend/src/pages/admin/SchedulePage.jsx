@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, X, CalendarOff, Trash2 } from "lucide-react";
+import { Plus, Pencil, X, CalendarOff, Trash2, RefreshCw } from "lucide-react";
 import { timeLabel } from "../../features/admin/utils";
 import { useAuth } from "../../context/AuthContext";
+import { useMockData } from "../../context/DataContext";
 import { sessionsService } from "../../services/sessionsService";
 
 const DAY_LABELS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
@@ -37,11 +38,19 @@ function nextDateForDayOfWeek(dayOfWeek) {
 
 export default function SchedulePage() {
   const { user } = useAuth();
+  const { refreshSessions } = useMockData();
   const isAdmin = user.roles.includes("ADMIN");
 
   const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Barrido manual (NOTAS-PARA-FRONTEND.md Bloque 2, A3) — desde ahora crear/editar/activar un
+  // horario ya genera sus sesiones solo, así que esto es solo para el caso raro en que haga falta
+  // forzarlo (soporte, o el barrido automático horario todavía no pasó).
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateMessage, setRegenerateMessage] = useState("");
+  const [regenerateError, setRegenerateError] = useState("");
 
   const [formModal, setFormModal] = useState(null); // null | { mode: 'add' } | { mode: 'edit', schedule }
   const [formError, setFormError] = useState("");
@@ -106,6 +115,10 @@ export default function SchedulePage() {
       }
       setFormModal(null);
       await loadSchedules();
+      // Crear/editar un horario ya genera sus sesiones del lado del servidor antes de responder
+      // (NOTAS-PARA-FRONTEND.md Bloque 2, A3) — este refetch ya las va a traer de una, no hace
+      // falta esperar a ningún barrido periódico.
+      refreshSessions();
     } catch (err) {
       setFormError(err.data?.message || err.message || "No se pudo guardar el horario.");
     } finally {
@@ -122,6 +135,22 @@ export default function SchedulePage() {
       await loadSchedules();
     } catch (err) {
       setDeleteError(err.data?.message || err.message || "No se pudo eliminar el horario.");
+    }
+  }
+
+  async function handleRegenerateSessions() {
+    setRegenerating(true);
+    setRegenerateError("");
+    setRegenerateMessage("");
+    try {
+      const result = await sessionsService.generateSessions();
+      setRegenerateMessage(result?.message || "Sesiones regeneradas.");
+      await refreshSessions();
+      setTimeout(() => setRegenerateMessage(""), 5000);
+    } catch (err) {
+      setRegenerateError(err.data?.message || err.message || "No se pudo regenerar las sesiones.");
+    } finally {
+      setRegenerating(false);
     }
   }
 
@@ -198,15 +227,40 @@ export default function SchedulePage() {
             </p>
           </div>
           {isAdmin && (
-            <button
-              onClick={openAdd}
-              className="flex items-center gap-1.5 bg-white text-neutral-950 hover:bg-neutral-200 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-colors shadow-md"
-            >
-              <Plus size={14} />
-              Nuevo horario
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Manual además del automático al guardar un horario — para el caso raro en que
+                  haga falta forzarlo (NOTAS-PARA-FRONTEND.md Bloque 2, A3). Idempotente del lado
+                  del servidor, así que pulsarlo de más no duplica nada. */}
+              <button
+                onClick={handleRegenerateSessions}
+                disabled={regenerating}
+                title="Genera las sesiones pendientes de los horarios activos, por si alguna no se creó sola"
+                className="flex items-center gap-1.5 text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl border border-neutral-800 hover:border-neutral-700 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={regenerating ? "animate-spin" : ""} />
+                {regenerating ? "Regenerando…" : "Regenerar sesiones"}
+              </button>
+              <button
+                onClick={openAdd}
+                className="flex items-center gap-1.5 bg-white text-neutral-950 hover:bg-neutral-200 font-bold text-xs px-3.5 py-1.5 rounded-xl transition-colors shadow-md"
+              >
+                <Plus size={14} />
+                Nuevo horario
+              </button>
+            </div>
           )}
         </div>
+
+        {regenerateMessage && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-xl">
+            {regenerateMessage}
+          </div>
+        )}
+        {regenerateError && (
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl">
+            {regenerateError}
+          </div>
+        )}
 
         {error && (
           <div className="p-4 bg-rose-500/10 border border-rose-500/20 text-rose-300 text-sm rounded-2xl">

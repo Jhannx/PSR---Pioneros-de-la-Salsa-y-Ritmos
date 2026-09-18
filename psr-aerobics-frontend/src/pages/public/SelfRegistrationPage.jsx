@@ -5,6 +5,7 @@ import Field from "../../components/forms/Field";
 import BirthDateField from "../../components/forms/BirthDateField";
 import RegistrationConfirmModal from "../../components/shared/RegistrationConfirmModal";
 import RegistrationConsent from "../../components/shared/RegistrationConsent";
+import RegistrationHealthAndContacts from "../../components/shared/RegistrationHealthAndContacts";
 import { peopleService } from "../../services/peopleService";
 import { isValidDocumentNumber, isValidPhone } from "../../utils/validation";
 
@@ -35,9 +36,23 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
   const [acceptedPolicy, setAcceptedPolicy] = useState(false);
   const [acceptedVoluntary, setAcceptedVoluntary] = useState(false);
 
+  // Salud y contactos de emergencia, opcionales (NOTAS-PARA-FRONTEND.md Bloque 2, C1) — antes
+  // esto solo se podía cargar estando logueado (docs/pendientes-back.md C1, resuelto). Ver
+  // RegistrationHealthAndContacts.jsx para el contrato completo del objeto.
+  const [healthAndContacts, setHealthAndContacts] = useState({
+    healthObservations: "",
+    healthDataConsent: false,
+    emergencyContacts: [],
+  });
+
   // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
   const documentoValid = isValidDocumentNumber(documento);
   const phoneValid = isValidPhone(phone);
+  // Si hay observaciones de salud escritas, hace falta su propio consentimiento (numeral 4.2) —
+  // sin esto el backend responde 400. Los contactos no necesitan este chequeo: `handleAddContactClick`
+  // en RegistrationHealthAndContacts.jsx nunca deja agregar uno sin `thirdPartyConsent: true`.
+  const healthConsentPending =
+    healthAndContacts.healthObservations.trim().length > 0 && !healthAndContacts.healthDataConsent;
 
   const canSubmit =
     firstName.trim() &&
@@ -47,6 +62,7 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
     birthDate &&
     acceptedPolicy &&
     acceptedVoluntary &&
+    !healthConsentPending &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
   async function handleSubmit() {
@@ -65,6 +81,17 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
         password: passwordMode === "documento" ? null : password,
         dataProcessingConsent: acceptedPolicy,
         voluntaryParticipationConsent: acceptedVoluntary,
+        // Opcionales — se omiten por completo si no hay nada, en vez de mandar
+        // healthObservations: "" o emergencyContacts: [] (NOTAS-PARA-FRONTEND.md Bloque 2, C1).
+        ...(healthAndContacts.healthObservations.trim()
+          ? {
+              healthObservations: healthAndContacts.healthObservations.trim(),
+              healthDataConsent: true,
+            }
+          : {}),
+        ...(healthAndContacts.emergencyContacts.length > 0
+          ? { emergencyContacts: healthAndContacts.emergencyContacts }
+          : {}),
       });
       setShowConfirm(false);
       setSubmitted(true);
@@ -205,7 +232,9 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
           </Field>
 
           <Field label="Fecha de nacimiento" icon={<Cake size={14} />}>
-            <BirthDateField value={birthDate} onChange={setBirthDate} selectClassName={inputClass} />
+            {/* minAge explícito (no solo el default del componente): el backend rechaza menores
+                de edad en el alta (RegisterService.MINIMUM_AGE), acá se ve desde el selector. */}
+            <BirthDateField value={birthDate} onChange={setBirthDate} minAge={18} selectClassName={inputClass} />
           </Field>
 
           <div>
@@ -258,6 +287,12 @@ export default function SelfRegistrationPage({ activityName = "Aeróbicos" }) {
             onAcceptedPolicyChange={setAcceptedPolicy}
             acceptedVoluntary={acceptedVoluntary}
             onAcceptedVoluntaryChange={setAcceptedVoluntary}
+          />
+
+          <RegistrationHealthAndContacts
+            value={healthAndContacts}
+            onChange={setHealthAndContacts}
+            inputClass={inputClass}
           />
         </div>
 

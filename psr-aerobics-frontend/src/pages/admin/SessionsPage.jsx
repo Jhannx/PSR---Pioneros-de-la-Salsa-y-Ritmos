@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, X, Ban, Users, CheckCircle2 } from "lucide-react";
+import { Plus, X, Ban, Users, CheckCircle2, RefreshCw } from "lucide-react";
 import { formatShortWeekdayDate as formatDate, formatTimeOfDay, toOffsetDateTime } from "../../utils/date";
 import { useMockData } from "../../context/DataContext";
 import { userService } from "../../services/userService";
@@ -8,10 +8,11 @@ const inputClass =
   "w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors";
 
 export default function SessionsPage() {
-  const { sessions, createSession, cancelSession, reassignSessionTeacher, people } = useMockData();
+  const { sessions, createSession, cancelSession, reassignSessionTeacher, people, refreshSessions } = useMockData();
   const [teachersList, setTeachersList] = useState([]);
   const [formError, setFormError] = useState("");
   const [cancelError, setCancelError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [cancelTarget, setCancelTarget] = useState(null);
@@ -48,6 +49,24 @@ export default function SessionsPage() {
       cancelled = true;
     };
   }, []);
+
+  // `sessions` viene de `DataContext`, que lo pide una sola vez al montar el provider — que
+  // envuelve toda la app y no se desmonta al navegar (docs/correcciones-pendientes-18-09.md #7).
+  // Sin este refetch propio, entrar a esta pantalla mucho después de haber iniciado sesión (una
+  // sesión creada por el barrido del servidor entre tanto, o por otra persona) se veía con datos
+  // viejos hasta recargar la página completa.
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshSessions();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleReassignTeacher(sessionId, newTeacherUserId) {
     if (!newTeacherUserId) return;
@@ -136,6 +155,18 @@ export default function SessionsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Botón manual además del refetch automático al montar — la sesión de un horario
+                recién creado puede tardar hasta la siguiente pasada del servidor en aparecer
+                (ver nota en Horarios), así que conviene poder pedirla sin recargar la página. */}
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="Volver a pedir las sesiones al servidor"
+              className="flex items-center gap-1.5 text-xs font-semibold text-neutral-400 hover:text-white px-3 py-1.5 rounded-xl border border-neutral-800 hover:border-neutral-700 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+              {refreshing ? "Actualizando…" : "Actualizar"}
+            </button>
             {cancelledCount > 0 && (
               <button
                 onClick={() => setShowCancelled((v) => !v)}

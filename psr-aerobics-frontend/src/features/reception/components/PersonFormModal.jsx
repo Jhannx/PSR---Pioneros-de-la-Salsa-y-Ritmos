@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import BirthDateField from "../../../components/forms/BirthDateField";
+import RegistrationHealthAndContacts from "../../../components/shared/RegistrationHealthAndContacts";
 import { isValidDocumentNumber, isValidPhone } from "../../../utils/validation";
 
 export default function PersonFormModal({ mode = "add", person, onSave, onClose, error, saving = false }) {
@@ -17,11 +18,23 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
   // registrado no vuelve a suministrar nada nuevo.
   const [signedPhysicalConsent, setSignedPhysicalConsent] = useState(false);
 
+  // Salud y contactos de emergencia, opcionales — solo al crear (NOTAS-PARA-FRONTEND.md Bloque 2,
+  // C1: "en las dos rutas de alta", `POST /api/personas` incluida). Al editar una persona
+  // existente esto sigue viviendo en sus propias pantallas (observaciones de salud, contactos de
+  // emergencia), no acá.
+  const [healthAndContacts, setHealthAndContacts] = useState({
+    healthObservations: "",
+    healthDataConsent: false,
+    emergencyContacts: [],
+  });
+
   // Front-only, ver docs/errores-13sep-front.md #3 — no reemplaza la validación real del backend.
   // El teléfono sigue siendo opcional en esta pantalla (igual que antes), pero si se escribe algo
   // debe parecer un teléfono real, no solo "no estar vacío".
   const documentoValid = isValidDocumentNumber(documentNumber);
   const phoneValid = !phone.trim() || isValidPhone(phone);
+  const healthConsentPending =
+    healthAndContacts.healthObservations.trim().length > 0 && !healthAndContacts.healthDataConsent;
 
   // Obligatorio para registros nuevos, no para editar uno existente (NOTAS-PARA-FRONTEND.md §5):
   // las personas registradas antes de este campo no lo tienen, y no hay por qué exigírselo recién
@@ -31,7 +44,7 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
     lastName.trim() &&
     documentoValid &&
     phoneValid &&
-    (mode === "edit" || (birthDate && signedPhysicalConsent));
+    (mode === "edit" || (birthDate && signedPhysicalConsent && !healthConsentPending));
 
   function handleSave() {
     if (!canSave) return;
@@ -43,7 +56,21 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
       phone: phone.trim(),
       email: email.trim() || null,
       birthDate: birthDate || null,
-      ...(mode === "add" ? { signedPhysicalConsent } : {}),
+      ...(mode === "add"
+        ? {
+            signedPhysicalConsent,
+            // Opcionales — se omiten por completo si no hay nada.
+            ...(healthAndContacts.healthObservations.trim()
+              ? {
+                  healthObservations: healthAndContacts.healthObservations.trim(),
+                  healthDataConsent: true,
+                }
+              : {}),
+            ...(healthAndContacts.emergencyContacts.length > 0
+              ? { emergencyContacts: healthAndContacts.emergencyContacts }
+              : {}),
+          }
+        : {}),
     });
   }
 
@@ -51,7 +78,11 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center px-4 z-50 font-body">
-      <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-md shadow-2xl">
+      {/* max-h + overflow-y-auto: la sección opcional de salud/contactos (RegistrationHealthAndContacts)
+          puede hacer crecer bastante el contenido al expandirse — sin esto, en una pantalla baja
+          (el propio kiosko de recepción, por ejemplo) los botones de Guardar/Cancelar quedaban
+          fuera de la vista y sin forma de llegar a ellos. */}
+      <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-white font-bold text-lg font-display">{title}</h2>
           <button onClick={onClose} className="text-neutral-500 hover:text-white">
@@ -138,9 +169,13 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
             <label className="text-neutral-400 text-xs font-semibold">
               Fecha de nacimiento{mode === "edit" ? " (opcional)" : ""}
             </label>
+            {/* minAge explícito (no solo el default del componente): el backend rechaza menores
+                de edad en el alta manual de recepción (RegisterService.MINIMUM_AGE) igual que en
+                el autoregistro — se ve desde el selector, en alta y en edición. */}
             <BirthDateField
               value={birthDate}
               onChange={setBirthDate}
+              minAge={18}
               className="mt-1"
               selectClassName="bg-neutral-950 border border-neutral-800 rounded-xl px-2 py-2.5 text-white text-sm outline-none focus:border-emerald-500"
             />
@@ -170,6 +205,12 @@ export default function PersonFormModal({ mode = "add", person, onSave, onClose,
                 firmado por esta persona.
               </span>
             </label>
+
+            <RegistrationHealthAndContacts
+              value={healthAndContacts}
+              onChange={setHealthAndContacts}
+              inputClass="w-full mt-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2.5 text-white text-sm placeholder-neutral-600 outline-none focus:border-emerald-500"
+            />
           </>
         )}
 

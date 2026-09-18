@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { formatCOP } from "../../utils/currency";
 import { formatHeaderDateShort as formatHeaderDate, formatTimeOfDay } from "../../utils/date";
 import { DAILY_RATE as FALLBACK_RATE, getUpcomingDays } from "../../features/reception/utils";
@@ -30,8 +30,28 @@ export default function ReceptionCheckinPage() {
 
   const [advanceModalId, setAdvanceModalId] = useState(null);
   const [selectedDays, setSelectedDays] = useState([0]);
-  const [refundTarget, setRefundTarget] = useState(null);
+  // Se guarda el `checkinId`, no el objeto de la fila (docs/correcciones-pendientes-18-09.md #6):
+  // `queue` se reemplaza entero por un array nuevo en cada `refreshQueue()`, así que un objeto
+  // capturado en el momento del clic queda congelado con el saldo de ESE instante. Guardando solo
+  // el id, `refundTarget` (abajo) se recalcula contra la cola actual en cada render — el modal
+  // siempre muestra el saldo real, incluso si cambió mientras estaba abierto.
+  const [refundCheckinId, setRefundCheckinId] = useState(null);
   const [actionError, setActionError] = useState("");
+  const [actionSuccess, setActionSuccess] = useState("");
+
+  // Autodescarte de los avisos de la barra de acciones — antes el de error se quedaba pegado para
+  // siempre y no tenía ni una "X" para cerrarlo (mismo punto del reporte).
+  useEffect(() => {
+    if (!actionError) return;
+    const timer = setTimeout(() => setActionError(""), 8000);
+    return () => clearTimeout(timer);
+  }, [actionError]);
+
+  useEffect(() => {
+    if (!actionSuccess) return;
+    const timer = setTimeout(() => setActionSuccess(""), 4000);
+    return () => clearTimeout(timer);
+  }, [actionSuccess]);
 
   useEffect(() => {
     async function loadData() {
@@ -219,7 +239,8 @@ export default function ReceptionCheckinPage() {
   // devolver".
   function handleOpenRefund(item) {
     setActionError("");
-    setRefundTarget(item);
+    setActionSuccess("");
+    setRefundCheckinId(item.checkinId);
   }
 
   async function handleConfirmRefund(amount, selectedMethodId) {
@@ -233,13 +254,17 @@ export default function ReceptionCheckinPage() {
       });
       // El saldo real llega solo, vía WebSocket/REST — nunca se recalcula a mano en el front.
       await refreshQueue();
-      setRefundTarget(null);
+      setActionSuccess(`Reembolso de ${formatCOP(amount)} registrado correctamente.`);
+      setRefundCheckinId(null);
     } catch (err) {
       setActionError(err.data?.message || err.message || "No se pudo procesar el reembolso.");
     }
   }
 
   const advancePerson = queue.find((p) => p.checkinId === advanceModalId);
+  // Derivado de `queue` en cada render, no un objeto capturado al abrir el modal — ver el
+  // comentario de `refundCheckinId` más arriba.
+  const refundTarget = refundCheckinId ? queue.find((p) => p.checkinId === refundCheckinId) : null;
   const upcomingDays = getUpcomingDays(10);
 
   return (
@@ -272,9 +297,31 @@ export default function ReceptionCheckinPage() {
           </div>
         </div>
 
+        {/* Con "X" para cerrar y descarte automático a los 8s — antes se quedaba pegado en
+            pantalla sin forma de quitarlo (docs/correcciones-pendientes-18-09.md #6). */}
         {actionError && (
-          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl">
-            {actionError}
+          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm rounded-xl flex items-center justify-between gap-3">
+            <span>{actionError}</span>
+            <button
+              onClick={() => setActionError("")}
+              className="text-rose-400/70 hover:text-rose-300 shrink-0"
+              aria-label="Cerrar aviso"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {actionSuccess && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm rounded-xl flex items-center justify-between gap-3">
+            <span>{actionSuccess}</span>
+            <button
+              onClick={() => setActionSuccess("")}
+              className="text-emerald-400/70 hover:text-emerald-300 shrink-0"
+              aria-label="Cerrar aviso"
+            >
+              <X size={16} />
+            </button>
           </div>
         )}
 
@@ -308,12 +355,17 @@ export default function ReceptionCheckinPage() {
         {/* Lista de Fila de Recepción */}
         <div className="flex flex-col gap-2.5">
           {/* Encabezado de columnas — antes la lista no tenía ninguno y no se distinguía qué era
-              cada campo sin pasar el mouse (errores-13sep-front.md #4). Oculto en pantallas
-              angostas porque QueueRow ya repite cada etiqueta ahí (`block sm:hidden`). */}
+              cada campo sin pasar el mouse (errores-13sep-front.md #4). Oculto por debajo de `lg`
+              porque QueueRow ya repite cada etiqueta ahí (`block lg:hidden`) en su tarjeta
+              apilada. El quiebre es `lg` (1024px) y no `sm` (640px): las cinco columnas de
+              QueueRow en fila necesitan ~738px mínimo, y entre 640-1024px el sidebar (240px desde
+              `md`) deja menos que eso — la fila se salía de la pantalla sin poder desplazarse
+              (`overflow-x-hidden` en AppLayout), la columna de Asistencia quedaba inalcanzable
+              (docs/correcciones-pendientes-18-09.md #5). */}
           {filteredQueue.length > 0 && (
-            <div className="hidden sm:flex items-center gap-3 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+            <div className="hidden lg:flex items-center gap-3 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
               <span className="w-6 text-center shrink-0">#</span>
-              <span className="flex-1 min-w-[220px]">Nombre / Fuente</span>
+              <span className="flex-1 min-w-0">Nombre / Fuente</span>
               <span className="w-40 shrink-0">Monto a Cobrar</span>
               <span className="w-40 shrink-0">Saldo</span>
               <span className="w-36 shrink-0 text-right">Asistencia</span>
@@ -456,13 +508,16 @@ export default function ReceptionCheckinPage() {
         <RefundModal
           person={{
             name: `${refundTarget.firstName || ""} ${refundTarget.lastName || ""}`,
-            // `balance` es el saldo real de la cuenta — la misma bolsa contra la que el backend
-            // valida `POST /api/personas/{id}/reembolso`.
-            amount: Math.max(0, Number(refundTarget.balance || 0)),
+            // `refundable`, no `balance` (NOTAS-PARA-FRONTEND.md Bloque 2, A5) — es el mismo
+            // número que usa la validación de `POST /api/personas/{id}/reembolso` del lado del
+            // servidor. `balance` descuenta lo ya consumido en asistencias, `refundable` no; usar
+            // `balance` acá era justo la causa del 400 "la persona solo tiene X pendiente de
+            // devolver" con un tope que parecía correcto pero no lo era.
+            amount: Math.max(0, Number(refundTarget.refundable ?? refundTarget.balance ?? 0)),
           }}
           onConfirm={handleConfirmRefund}
           onClose={() => {
-            setRefundTarget(null);
+            setRefundCheckinId(null);
             setActionError("");
           }}
           error={actionError}

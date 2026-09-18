@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCircle2, CreditCard, KeyRound, Mail, ArrowLeft } from "lucide-react";
+import { CheckCircle2, CreditCard, KeyRound, Mail, Cake, ArrowLeft } from "lucide-react";
 import Field from "../../components/forms/Field";
+import BirthDateField from "../../components/forms/BirthDateField";
+import RegistrationConsent from "../../components/shared/RegistrationConsent";
+import RegistrationHealthAndContacts from "../../components/shared/RegistrationHealthAndContacts";
 import { peopleService } from "../../services/peopleService";
 import { queueService } from "../../services/queueService";
 
@@ -16,6 +19,14 @@ export default function MemberRegistrationPage({ activityName = "Aeróbicos" }) 
   const [documento, setDocumento] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  // Faltaba por completo (encontrado al conectar NOTAS-PARA-FRONTEND.md): esta pantalla llamaba a
+  // `autoRegister` sin `birthDate` ni los consentimientos de registro, los tres obligatorios del
+  // lado del backend (`birthDate` @NotNull, los otros dos obligatorios en la ruta de
+  // autoregistro) — cualquier envío daba 400. La pantalla tampoco está enlazada desde ningún lado
+  // de la UI todavía, así que nadie lo había notado.
+  const [birthDate, setBirthDate] = useState("");
+  const [acceptedPolicy, setAcceptedPolicy] = useState(false);
+  const [acceptedVoluntary, setAcceptedVoluntary] = useState(false);
   const [passwordMode, setPasswordMode] = useState("documento"); // documento | propia
   const [password, setPassword] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -23,11 +34,24 @@ export default function MemberRegistrationPage({ activityName = "Aeróbicos" }) 
   const [errorMessage, setErrorMessage] = useState("");
   const [queuePosition, setQueuePosition] = useState(null);
 
+  // Salud y contactos de emergencia, opcionales (NOTAS-PARA-FRONTEND.md Bloque 2, C1).
+  const [healthAndContacts, setHealthAndContacts] = useState({
+    healthObservations: "",
+    healthDataConsent: false,
+    emergencyContacts: [],
+  });
+  const healthConsentPending =
+    healthAndContacts.healthObservations.trim().length > 0 && !healthAndContacts.healthDataConsent;
+
   const canSubmit =
     firstName.trim() &&
     lastName.trim() &&
     documento.trim() &&
     phone.trim() &&
+    birthDate &&
+    acceptedPolicy &&
+    acceptedVoluntary &&
+    !healthConsentPending &&
     (passwordMode === "documento" || password.trim().length >= 8);
 
   async function handleSubmit() {
@@ -42,7 +66,19 @@ export default function MemberRegistrationPage({ activityName = "Aeróbicos" }) 
         lastName: lastName.trim(),
         phone: phone.trim(),
         email: email.trim() || undefined,
+        birthDate,
         password: passwordMode === "documento" ? null : password,
+        dataProcessingConsent: acceptedPolicy,
+        voluntaryParticipationConsent: acceptedVoluntary,
+        ...(healthAndContacts.healthObservations.trim()
+          ? {
+              healthObservations: healthAndContacts.healthObservations.trim(),
+              healthDataConsent: true,
+            }
+          : {}),
+        ...(healthAndContacts.emergencyContacts.length > 0
+          ? { emergencyContacts: healthAndContacts.emergencyContacts }
+          : {}),
       });
 
       try {
@@ -194,6 +230,12 @@ export default function MemberRegistrationPage({ activityName = "Aeróbicos" }) 
             </Field>
           </div>
 
+          <Field label="Fecha de nacimiento" icon={<Cake size={14} />}>
+            {/* minAge explícito (no solo el default del componente): el backend rechaza menores
+                de edad en el alta (RegisterService.MINIMUM_AGE), acá se ve desde el selector. */}
+            <BirthDateField value={birthDate} onChange={setBirthDate} minAge={18} selectClassName={inputClass} />
+          </Field>
+
           <div className="border-t border-neutral-800 pt-3">
             <label className="text-neutral-300 text-xs font-semibold flex items-center gap-1.5 mb-2">
               <KeyRound size={14} />
@@ -239,6 +281,19 @@ export default function MemberRegistrationPage({ activityName = "Aeróbicos" }) 
               </>
             )}
           </div>
+
+          <RegistrationConsent
+            acceptedPolicy={acceptedPolicy}
+            onAcceptedPolicyChange={setAcceptedPolicy}
+            acceptedVoluntary={acceptedVoluntary}
+            onAcceptedVoluntaryChange={setAcceptedVoluntary}
+          />
+
+          <RegistrationHealthAndContacts
+            value={healthAndContacts}
+            onChange={setHealthAndContacts}
+            inputClass={inputClass}
+          />
         </div>
 
         <button

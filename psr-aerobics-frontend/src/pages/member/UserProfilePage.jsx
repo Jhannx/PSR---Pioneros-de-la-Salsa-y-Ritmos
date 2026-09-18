@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { ROLE_LABELS, ROLE_BADGE_STYLES } from "../../context/mockDataConstants";
 import { peopleService } from "../../services/peopleService";
 import { authService } from "../../services/authService";
+import { downloadPersonalDataPdf } from "../../utils/personalDataPdf";
 import { User, Phone, Mail, Shield, CheckCircle2, Lock, ChevronRight, Cake, Download, FileWarning } from "lucide-react";
 
 const inputClass =
@@ -29,11 +30,17 @@ export default function UserProfilePage() {
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [successMessage, setSuccessMessage] = useState(null);
+  // Mensaje de éxito propio de esta tarjeta, no uno compartido con el resto de la página
+  // (docs/correcciones-pendientes-18-09.md #3): antes las dos confirmaciones ("perfil guardado" y
+  // "contraseña cambiada") compartían un único banner pintado arriba de todo — en una pantalla de
+  // ~500px, guardar la contraseña (la última tarjeta) confirmaba fuera de la vista, indistinguible
+  // de que no hubiera pasado nada.
+  const [profileSuccessMessage, setProfileSuccessMessage] = useState("");
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [passwordSuccessMessage, setPasswordSuccessMessage] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
 
   // Cambio de correo — flujo aparte del formulario de datos personales, porque el backend lo
@@ -53,6 +60,12 @@ export default function UserProfilePage() {
   // (viaja dentro del perfil), terceros y financiero (política numeral 2), sin necesitar un
   // endpoint nuevo: son los mismos tres que ya autoriza la política a "la propia persona titular"
   // (numeral 6). Ensamblado en el navegador, no en el backend — no hay endpoint de exportación.
+  //
+  // En PDF, no en JSON (docs/correcciones-pendientes-18-09.md #2) — un volcado de JSON crudo no es
+  // un formato pensado para que la persona titular lo lea; `personalDataPdf.js` arma un documento
+  // legible con lo mismo que ya se pedía acá. Cada sección se marca "No disponible" si su propio
+  // `fetch` falló, sin tumbar las demás — por eso siguen siendo cuatro llamadas en paralelo con
+  // `allSettled` en vez de un solo `try` que aborte todo ante el primer error.
   const [downloadingData, setDownloadingData] = useState(false);
   const [downloadError, setDownloadError] = useState("");
 
@@ -61,30 +74,17 @@ export default function UserProfilePage() {
     setDownloadingData(true);
     setDownloadError("");
     try {
-      const [profileRes, contactsRes, balanceRes, consentsRes] = await Promise.allSettled([
+      const [profile, contacts, balance, consents] = await Promise.allSettled([
         peopleService.getProfile(user.personId),
         peopleService.getEmergencyContacts(user.personId),
         peopleService.getBalance(user.personId),
         peopleService.getConsents(user.personId),
       ]);
-      const payload = {
-        generadoEl: new Date().toISOString(),
-        perfil: profileRes.status === "fulfilled" ? profileRes.value : null,
-        contactosEmergencia: contactsRes.status === "fulfilled" ? contactsRes.value : [],
-        saldo: balanceRes.status === "fulfilled" ? balanceRes.value : null,
-        // Qué autorizó y cuándo (numeral 10) — incluye el histórico completo que devuelva el
-        // backend, no solo el estado actual.
-        consentimientos: consentsRes.status === "fulfilled" ? consentsRes.value : null,
-      };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `mis-datos-psr-${TODAY_ISO}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      await downloadPersonalDataPdf({
+        user,
+        settled: { profile, contacts, balance, consents },
+        fileName: `mis-datos-psr-${TODAY_ISO}.pdf`,
+      });
     } catch (err) {
       setDownloadError(err.data?.message || err.message || "No fue posible generar la descarga.");
     } finally {
@@ -138,20 +138,22 @@ export default function UserProfilePage() {
     if (!user?.personId) return;
     setSaving(true);
     setSaveError("");
+    setProfileSuccessMessage("");
     try {
-      // PersonUpdateRequest no incluye email: el correo no se puede cambiar desde aquí.
-      // Sí incluye birthDate (NOTAS-PARA-FRONTEND.md §5).
-      await peopleService.update(user.personId, {
-        documentType: formData.documentType,
-        documentNumber: formData.documentNumber,
+      // PUT /api/personas/{id}/mis-datos (NOTAS-PARA-FRONTEND.md Bloque 2, A2) — no
+      // PUT /api/personas/{id}: aquel es de mostrador (403 para un MIEMBRO) y además reescribe
+      // documento, algo que esta pantalla ni siquiera deja editar. El nuevo endpoint no incluye
+      // email (el correo tiene su propio flujo de dos pasos, más abajo) ni documento/tipo de
+      // documento — no hay forma de tocarlos desde acá.
+      await peopleService.updateMyData(user.personId, {
         firstName: formData.firstName,
         lastName: formData.lastName,
         phone: formData.phone,
         birthDate: formData.birthDate || null,
       });
       updateUserProfile({ fullName: `${formData.firstName} ${formData.lastName}`.trim() });
-      setSuccessMessage("Tu información de perfil ha sido actualizada correctamente.");
-      setTimeout(() => setSuccessMessage(null), 4000);
+      setProfileSuccessMessage("Tu información de perfil ha sido actualizada correctamente.");
+      setTimeout(() => setProfileSuccessMessage(""), 4000);
     } catch (err) {
       setSaveError(err.data?.message || err.message || "No se pudo guardar el perfil.");
     } finally {
@@ -179,15 +181,28 @@ export default function UserProfilePage() {
 
   async function handleChangePassword(e) {
     e.preventDefault();
-    if (!currentPassword || newPassword.length < 8) return;
-    setChangingPassword(true);
+    if (changingPassword) return;
+    setPasswordSuccessMessage("");
+    // Antes el botón simplemente quedaba `disabled` con campos incompletos, sin decir por qué —
+    // un clic sobre un botón deshabilitado es indistinguible de "no pasó nada"
+    // (docs/correcciones-pendientes-18-09.md #3). Ahora el botón siempre se puede pulsar y, si
+    // falta algo, se explica acá con el mismo `passwordError` que ya usan los fallos del backend.
+    if (!currentPassword) {
+      setPasswordError("Ingresa tu contraseña actual.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setPasswordError("La nueva contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
     setPasswordError("");
+    setChangingPassword(true);
     try {
       await authService.changePassword(currentPassword, newPassword);
       setCurrentPassword("");
       setNewPassword("");
-      setSuccessMessage("Contraseña modificada con éxito.");
-      setTimeout(() => setSuccessMessage(null), 4000);
+      setPasswordSuccessMessage("Contraseña modificada con éxito.");
+      setTimeout(() => setPasswordSuccessMessage(""), 4000);
     } catch (err) {
       setPasswordError(err.data?.message || err.message || "No se pudo cambiar la contraseña.");
     } finally {
@@ -205,13 +220,6 @@ export default function UserProfilePage() {
             Gestiona tus datos personales, información de contacto y preferencias de cuenta
           </p>
         </div>
-
-        {successMessage && (
-          <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-2xl text-sm flex items-center gap-2">
-            <CheckCircle2 size={18} />
-            <span>{successMessage}</span>
-          </div>
-        )}
 
         {loadError && (
           <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-2xl text-sm">
@@ -316,7 +324,16 @@ export default function UserProfilePage() {
             </div>
           )}
 
-          <div className="flex justify-end pt-2">
+          {/* Confirmación junto al propio botón, no arriba de la página — en una pantalla larga
+              (~500 líneas) un banner al tope pasa desapercibido para quien guarda la última
+              tarjeta (docs/correcciones-pendientes-18-09.md #3, mismo defecto que la contraseña). */}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            {profileSuccessMessage && (
+              <span className="flex items-center gap-1.5 text-emerald-400 text-xs font-semibold">
+                <CheckCircle2 size={14} />
+                {profileSuccessMessage}
+              </span>
+            )}
             <button
               type="submit"
               disabled={saving || loading}
@@ -431,7 +448,7 @@ export default function UserProfilePage() {
             className="flex items-center gap-2 bg-neutral-800 disabled:opacity-40 hover:bg-neutral-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors"
           >
             <Download size={14} />
-            {downloadingData ? "Generando..." : "Descargar mis datos (JSON)"}
+            {downloadingData ? "Generando..." : "Descargar mis datos (PDF)"}
           </button>
         </div>
 
@@ -495,10 +512,21 @@ export default function UserProfilePage() {
             </div>
           )}
 
-          <div className="flex justify-end pt-2">
+          {/* Botón siempre pulsable — antes quedaba `disabled` con campos incompletos sin decir
+              por qué, y un clic sobre un botón deshabilitado es indistinguible de "no pasó nada"
+              (docs/correcciones-pendientes-18-09.md #3). El único disabled legítimo es mientras
+              hay una petición en vuelo. Confirmación junto al botón, no arriba de la página —
+              esta es la última tarjeta de la pantalla y un banner al tope pasa desapercibido. */}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            {passwordSuccessMessage && (
+              <span className="flex items-center gap-1.5 text-emerald-400 text-xs font-semibold">
+                <CheckCircle2 size={14} />
+                {passwordSuccessMessage}
+              </span>
+            )}
             <button
               type="submit"
-              disabled={!currentPassword || newPassword.length < 8 || changingPassword}
+              disabled={changingPassword}
               className="bg-neutral-800 disabled:opacity-40 hover:bg-neutral-700 text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors"
             >
               {changingPassword ? "Cambiando..." : "Cambiar Contraseña"}

@@ -20,24 +20,41 @@ export const peopleService = {
 
   create: async (data) => {
     // PersonRequest: { documentType, documentNumber, firstName, lastName, phone,
-    // signedPhysicalConsent }. El alta manual de recepción no pasa por ningún checkbox
-    // digital — signedPhysicalConsent es la confirmación de quien atiende el mostrador de que
-    // tiene el formato físico firmado delante, no la aceptación de la persona registrada
-    // (NOTAS-PARA-FRONTEND.md §2). Sin él, 400.
+    // signedPhysicalConsent, healthObservations?, healthDataConsent?, emergencyContacts? }. El
+    // alta manual de recepción no pasa por ningún checkbox digital — signedPhysicalConsent es la
+    // confirmación de quien atiende el mostrador de que tiene el formato físico firmado delante,
+    // no la aceptación de la persona registrada (NOTAS-PARA-FRONTEND.md §2). Sin él, 400. Los tres
+    // últimos son opcionales (NOTAS-PARA-FRONTEND.md Bloque 2, C1) — salud y contactos de
+    // emergencia, cargados de una vez con el resto del alta; si vienen, valen las mismas reglas
+    // que en sus endpoints sueltos (máx. 2000 caracteres / máx. 5 contactos, consentimiento
+    // obligatorio cuando hay contenido).
     return await apiClient.post("/api/personas", data);
   },
 
   autoRegister: async (data) => {
     // PersonRequest: { documentType, documentNumber, firstName, lastName, phone,
-    // dataProcessingConsent, voluntaryParticipationConsent } — los dos checkboxes de
-    // RegistrationConsent.jsx (numerales 4.1 y 12). Cualquiera en false/null/ausente, 400
-    // (NOTAS-PARA-FRONTEND.md §1).
+    // dataProcessingConsent, voluntaryParticipationConsent, healthObservations?,
+    // healthDataConsent?, emergencyContacts? } — los dos primeros son los checkboxes de
+    // RegistrationConsent.jsx (numerales 4.1 y 12); cualquiera en false/null/ausente, 400
+    // (NOTAS-PARA-FRONTEND.md §1). Los tres últimos son opcionales (NOTAS-PARA-FRONTEND.md
+    // Bloque 2, C1) — ver RegistrationHealthAndContacts.jsx.
     return await apiClient.post("/api/personas/autoregistro", data);
   },
 
+  // Mostrador: reescribe documento, nombre y teléfono. Restringido a DESK — un MIEMBRO que llame
+  // esto recibe 403, por eso "Mi Perfil" usa `updateMyData` de abajo, no este.
   update: async (id, data) => {
     // PersonUpdateRequest: { documentType, documentNumber, firstName, lastName, phone }
     return await apiClient.put(`/api/personas/${id}`, data);
+  },
+
+  // "Mi Perfil" (NOTAS-PARA-FRONTEND.md Bloque 2, A2) — endpoint propio para lo que sí es del
+  // dueño: no lleva documento ni tipo de documento en el DTO, así que no hay forma de tocarlos por
+  // acá, a propósito. DESK + el propio titular. Los cuatro campos son obligatorios (es un
+  // reemplazo completo, como el PUT de mostrador).
+  updateMyData: async (id, data) => {
+    // { firstName, lastName, phone, birthDate }
+    return await apiClient.put(`/api/personas/${id}/mis-datos`, data);
   },
 
   // Cambio de correo en dos pasos — a propósito no es un PUT directo (NOTAS-PARA-FRONTEND.md §2):

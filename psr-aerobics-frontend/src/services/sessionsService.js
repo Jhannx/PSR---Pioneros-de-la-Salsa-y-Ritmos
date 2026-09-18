@@ -81,4 +81,13 @@ export const sessionsService = {
   deleteScheduleException: async (exceptionId) => {
     return await apiClient.delete(`/api/horarios/excepciones/${exceptionId}`);
   },
+
+  // Barrido manual (NOTAS-PARA-FRONTEND.md Bloque 2, A3) — desde este round, crear/editar/activar
+  // un horario ya dispara la generación de sus sesiones solo, así que esto es para el caso raro
+  // en que haga falta forzarlo (soporte, o el barrido automático horario todavía no pasó).
+  // Idempotente del lado del backend: lo que ya existe no se duplica. Responde
+  // { message: "N sesión(es) creada(s)." }. ADMIN únicamente.
+  generateSessions: async () => {
+    return await apiClient.post("/api/horarios/generar-sesiones");
+  },
 };

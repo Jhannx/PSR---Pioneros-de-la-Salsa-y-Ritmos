@@ -23,10 +23,17 @@ function parseValue(value) {
 // `value`/`onChange` usan el mismo formato ISO "YYYY-MM-DD" (o "") que ya manejan los tres
 // formularios de fecha de nacimiento — solo se reemplaza el input, el resto de cada formulario
 // no cambia. `minAge`/`oldestAge` acotan el rango de años mostrado.
+//
+// Default 18 y no un valor arbitrario: RegisterService.MINIMUM_AGE en el backend rechaza el alta
+// de cualquier persona menor de edad (validateIsAdult, en las dos altas: admin y autoregistro).
+// Antes el default era 10, así que el selector dejaba elegir hasta el año 2016 — se acordó "no se
+// permiten menores de edad" y solo se atajaba con un alert después del submit
+// (docs/correcciones-pendientes-18-09.md #8). Con 18 la restricción queda en el propio selector:
+// no se puede ni construir una fecha de menor de edad.
 export default function BirthDateField({
   value,
   onChange,
-  minAge = 10,
+  minAge = 18,
   oldestAge = 100,
   selectClassName = "bg-neutral-800 border border-neutral-700 rounded-xl px-2 py-2.5 text-white text-sm outline-none focus:border-emerald-500 transition-colors",
   className = "",
