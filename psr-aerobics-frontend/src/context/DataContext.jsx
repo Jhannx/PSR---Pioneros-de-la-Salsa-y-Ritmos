@@ -6,6 +6,7 @@ import { sessionsService } from "../services/sessionsService";
 import { TOKEN_STORAGE_KEY } from "../services/apiClient";
 import { createQueueSocketClient } from "../services/websocketService";
 import { useAuth } from "./AuthContext";
+import { STAFF_ROLES } from "../constants/roles";
 import { toLocalDateString } from "../utils/date";
 
 const DataContext = createContext(null);
@@ -22,17 +23,23 @@ function getSessionsDateRange() {
 }
 
 export function DataProvider({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  // Solo el personal puede leer la cola, las personas y las sesiones. Antes se pedían para
+  // CUALQUIER cuenta con sesión — un MIEMBRO recibía 403 en cada una (y en cada señal del
+  // WebSocket), con el `Acceso denegado` correspondiente en el log del servidor
+  // (docs/correciones 20-09.md). No es lógica de negocio: es no pedir lo que ya se sabe que se
+  // va a rechazar.
+  const isStaff = Boolean(user?.roles?.some((role) => STAFF_ROLES.includes(role)));
   const [people, setPeople] = useState([]);
   const [queue, setQueue] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Carga inicial de datos solo si existe un token de autenticación
+  // Carga de datos solo si hay sesión iniciada Y es personal; si no, deja todo vacío.
   const refreshData = useCallback(async () => {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (!token) {
+    if (!token || !isStaff) {
       setLoading(false);
       setPeople([]);
       setQueue([]);
@@ -74,20 +81,28 @@ export function DataProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isStaff]);
 
+  // Se relee también al INICIAR SESIÓN, no solo al montar la app. `DataProvider` envuelve toda la
+  // aplicación y no se desmonta al navegar, así que antes esto corría una sola vez, al abrir la
+  // pestaña — con el usuario todavía sin sesión (no había token y todo quedaba vacío). Después de
+  // loguearse nada volvía a pedir los datos: la lista de check-in aparecía vacía hasta recargar la
+  // página o hasta que llegara una señal del WebSocket ("me tocó hacer una acción para que
+  // redespertara"). `isAuthenticated` cambia al loguear/desloguear y `refreshData` cambia si
+  // cambian los roles, así que este efecto cubre las dos cosas.
   useEffect(() => {
     Promise.resolve().then(refreshData);
-  }, [refreshData]);
+  }, [refreshData, isAuthenticated]);
 
   const refreshQueue = useCallback(async () => {
+    if (!isStaff) return;
     try {
       const qData = await queueService.getAdminQueue();
       setQueue(Array.isArray(qData) ? qData : qData?.content || []);
     } catch (err) {
       console.warn("No se pudo refrescar la cola de admin:", err);
     }
-  }, []);
+  }, [isStaff]);
 
   // `sessions` solo se pedía una vez, en `refreshData`, al montar el provider — que envuelve toda
   // la app y nunca se desmonta al navegar entre pantallas. Sin esto, nada volvía a pedir sesiones
@@ -99,6 +114,7 @@ export function DataProvider({ children }) {
   // datos frescos (SessionsPage al montar, SchedulePage tras crear/editar un horario) debe
   // llamarlo explícitamente.
   const refreshSessions = useCallback(async () => {
+    if (!isStaff) return;
     try {
       const { desde, hasta } = getSessionsDateRange();
       const sData = await sessionsService.getSessions(desde, hasta);
@@ -106,7 +122,7 @@ export function DataProvider({ children }) {
     } catch (err) {
       console.warn("No se pudo refrescar las sesiones:", err);
     }
-  }, []);
+  }, [isStaff]);
 
   // Un check-in propio (QR/self-checkin desde MemberHomePage) o de terminal quedaba invisible en
   // `reception/checkin`: `queue` solo se pedía una vez al montar y después de la propia acción
@@ -126,11 +142,20 @@ export function DataProvider({ children }) {
   // array ni trae `.content`), lo que en la práctica VACIABA la cola en cada evento en vez de
   // actualizarla. Correcto es: la señal solo dispara un refetch real por REST.
   useEffect(() => {
-    if (!isAuthenticated) return;
+    // Solo el personal: `/topic/cola/admin` no le sirve a un miembro, y cada señal disparaba una
+    // relectura de la cola que le respondía 403.
+    if (!isAuthenticated || !isStaff) return;
 
     const client = createQueueSocketClient({
-      onAdminQueue: () => {
+      onAdminQueue: (event) => {
         refreshQueue();
+        // `SESSION_CHANGED` (NOTAS-PARA-FRONTEND.md Bloque 3, punto 3): el backend lo publica al
+        // crear, cerrar o cancelar una sesión, en los tres topics. La cola ya se relee arriba con
+        // cualquier señal; además cambió la lista de sesiones, así que también se relee — sin esto,
+        // una sesión cancelada o creada desde otra pestaña u otra persona se seguía viendo vieja en
+        // "Sesiones" hasta recargar. Como todas las señales, no trae datos: solo avisa que hay que
+        // volver a preguntar por REST.
+        if (event?.type === "SESSION_CHANGED") refreshSessions();
       },
       onError: (err) => {
         console.warn("WebSocket de cola (admin) con error:", err);
@@ -150,7 +175,7 @@ export function DataProvider({ children }) {
         // Ignorado: si ya estaba desconectado no hay nada que limpiar.
       }
     };
-  }, [isAuthenticated, refreshQueue]);
+  }, [isAuthenticated, isStaff, refreshQueue, refreshSessions]);
 
   // Operaciones de personas
   async function addPerson(personData) {
@@ -250,9 +275,30 @@ export function DataProvider({ children }) {
     try {
       const updated = await sessionsService.cancelSession(id);
       setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...(updated || { cancelled: true }) } : s)));
+      // Los check-ins de esa sesión dejan de valer, pero `queue` solo se releía por el WebSocket
+      // (que depende de que el backend avise) o al hacer otra acción — por eso, tras cancelar, la
+      // fila de recepción seguía mostrando gente de una sesión ya cancelada hasta que algo la
+      // "despertaba". Se relee la cola acá mismo, sin esperar a ninguna señal. `refreshQueue` no
+      // lanza (captura sus propios errores), así que no puede tumbar la cancelación ya hecha.
+      await refreshQueue();
       return updated;
     } catch (err) {
       console.error("Error al cancelar sesión:", err);
+      throw err;
+    }
+  }
+
+  // Finalizar una sesión que sigue en curso (`PUT /api/sesiones/{id}/cerrar`): antes la única salida
+  // era cancelarla, que equivale a borrarla (docs/correciones 20-09.md). Cerrar una que ya pasó su
+  // hora de fin es un no-op del lado del servidor (200 con la sesión sin tocar). Se relee todo
+  // lo que cambia: la sesión (su `status`) y la cola (la vigente puede ser otra ahora).
+  async function closeSession(id) {
+    try {
+      const updated = await sessionsService.closeSession(id);
+      await Promise.all([refreshSessions(), refreshQueue()]);
+      return updated;
+    } catch (err) {
+      console.error("Error al finalizar la sesión:", err);
       throw err;
     }
   }
@@ -293,6 +339,7 @@ export function DataProvider({ children }) {
         removeFromQueue,
         createSession,
         cancelSession,
+        closeSession,
         reassignSessionTeacher,
       }}
     >

@@ -105,11 +105,10 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
 
       <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
         <span
-          className={`flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-full border ${
-            isConnected
+          className={`flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-full border ${isConnected
               ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
               : "bg-amber-500/10 border-amber-500/30 text-amber-400"
-          }`}
+            }`}
         >
           {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
           {isConnected ? "WS En Vivo" : "Desconectado"}
@@ -195,9 +194,8 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
                   return (
                     <div
                       key={checkinId}
-                      className={`bg-emerald-900/40 border border-emerald-500/50 p-3.5 rounded-2xl flex items-center justify-between text-emerald-200 transition-all duration-300 ${
-                        isExpiring ? "opacity-0 scale-95" : "opacity-100 scale-100"
-                      }`}
+                      className={`bg-emerald-900/40 border border-emerald-500/50 p-3.5 rounded-2xl flex items-center justify-between text-emerald-200 transition-all duration-300 ${isExpiring ? "opacity-0 scale-95" : "opacity-100 scale-100"
+                        }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <div className="w-6 h-6 rounded-full bg-emerald-500 text-neutral-950 flex items-center justify-center font-bold text-xs shrink-0">

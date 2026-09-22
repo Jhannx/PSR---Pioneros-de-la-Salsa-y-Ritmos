@@ -6,13 +6,43 @@ export const sessionsService = {
   // por adelantado, la página 0 se llena de sesiones futuras y la de HOY cae a la página 2, dando
   // la impresión de que se "borró" sin que nada se haya borrado. `desde`/`hasta` van siempre juntos
   // (o ninguno) — `size` grande de respaldo por si el rango igual pagina.
-  getSessions: async (desde, hasta, size = 200) => {
+  //
+  // `estado` (NOTAS-PARA-FRONTEND.md Bloque 4, punto 6): "activas" (lo que el servidor asume si no se
+  // manda), "canceladas" o "todas"; cualquier otro valor da 400. Cada sesión trae su `status`
+  // (UPCOMING / IN_PROGRESS / ENDED / CANCELLED), calculado con el reloj del servidor.
+  getSessions: async (desde, hasta, size = 200, estado) => {
     const params = new URLSearchParams();
     if (desde) params.append("desde", desde);
     if (hasta) params.append("hasta", hasta);
     if (size) params.append("size", size);
+    if (estado) params.append("estado", estado);
     const queryString = params.toString();
     return await apiClient.get(`/api/sesiones${queryString ? `?${queryString}` : ""}`);
+  },
+
+  // Solo las sesiones del profesor logueado — sale del TOKEN, no lleva su id en la ruta a propósito
+  // (así ningún profesor puede ver la agenda de otro cambiando un número). Paginado (`content`),
+  // con el mismo `status`. No trae totales: esos vienen de `getSessionSummaries`.
+  getMySessions: async (desde, hasta, size = 200) => {
+    const params = new URLSearchParams();
+    if (desde) params.append("desde", desde);
+    if (hasta) params.append("hasta", hasta);
+    if (size) params.append("size", size);
+    return await apiClient.get(`/api/sesiones/mias?${params.toString()}`);
+  },
+
+  // Totales por sesión (`totalCheckins` / `totalAttended`) para un rango de fechas.
+  getSessionSummaries: async (desde, hasta) => {
+    const params = new URLSearchParams();
+    if (desde) params.append("desde", desde);
+    if (hasta) params.append("hasta", hasta);
+    return await apiClient.get(`/api/sesiones/resumenes?${params.toString()}`);
+  },
+
+  // Quién llegó a una sesión, incluida la gente que llegó y NO fue confirmada (`attended: false`):
+  // [{ personId, fullName, arrivalTime, attended, markedAt, amountCharged }]. STAFF.
+  getSessionAttendees: async (id) => {
+    return await apiClient.get(`/api/sesiones/${id}/asistentes`);
   },
 
   // Sesiones de un solo día — no pagina, no puede esconder ninguna (RESPUESTA-NOTAS-FINAL.md #2).

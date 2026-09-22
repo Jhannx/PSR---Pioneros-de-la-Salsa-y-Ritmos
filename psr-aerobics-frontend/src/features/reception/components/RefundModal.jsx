@@ -2,15 +2,22 @@ import { useState, useEffect, useRef } from "react";
 import { X, Undo2 } from "lucide-react";
 import { formatCOP } from "../../../utils/currency";
 import { paymentsService } from "../../../services/paymentsService";
+import { pickDefaultPaymentMethodId } from "../utils";
 
 export default function RefundModal({ person = {}, onConfirm, onClose, error = "" }) {
-  const max = Number(person.amount || person.amountCharged || person.balance || 4000);
+  // Antes: `person.amount || ... || 4000` — con un tope de 0 (nada que devolver) el `||` caía al
+  // valor de respaldo 4000 y el modal dejaba "devolver" 4.000 que no existían. El único que abre
+  // este modal (ReceptionCheckinPage) siempre manda `amount`, ya calculado con `getRefundCap`.
+  const max = Math.max(0, Number(person.amount) || 0);
   const [amount, setAmount] = useState(max);
-  const [paymentMethods, setPaymentMethods] = useState([
-    { id: 1, name: "Efectivo" },
-    { id: 2, name: "Nequi / Bancolombia" },
-  ]);
-  const [selectedMethodId, setSelectedMethodId] = useState(1);
+  // Sin lista de respaldo inventada (antes: Efectivo/Nequi con ids 1 y 2): si el servidor no
+  // responde o no hay ningún método activo, mostrar esos dos igual permitía elegir métodos que
+  // quizá ya estaban desactivados — justo lo que se reportó el 19-09. Solo se ofrece lo que el
+  // servidor confirma como activo.
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [selectedMethodId, setSelectedMethodId] = useState(null);
+  const [methodsLoading, setMethodsLoading] = useState(true);
+  const [methodsError, setMethodsError] = useState("");
   // Candado contra doble envío (docs/correcciones-pendientes-18-09.md #6): sin esto, dos clics
   // rápidos en "Confirmar reembolso" mandan dos POST — el primero devuelve el saldo completo, el
   // segundo llega con 0 disponible y el backend responde 400 ("la persona solo tiene 0 pendiente
@@ -20,18 +27,26 @@ export default function RefundModal({ person = {}, onConfirm, onClose, error = "
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    let cancelled = false;
     async function loadMethods() {
       try {
-        const methods = await paymentsService.getPaymentMethods();
-        if (Array.isArray(methods) && methods.length > 0) {
-          setPaymentMethods(methods);
-          setSelectedMethodId(methods[0].id);
-        }
+        // Solo los activos (ver `getActivePaymentMethods`), con efectivo preseleccionado.
+        const active = await paymentsService.getActivePaymentMethods();
+        if (cancelled) return;
+        setPaymentMethods(active);
+        setSelectedMethodId(pickDefaultPaymentMethodId(active));
       } catch (err) {
-        console.warn("No se cargaron métodos de pago desde API, usando defaults:", err);
+        if (!cancelled) {
+          setMethodsError(err.data?.message || err.message || "No se pudieron cargar los métodos de pago.");
+        }
+      } finally {
+        if (!cancelled) setMethodsLoading(false);
       }
     }
     loadMethods();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -40,7 +55,12 @@ export default function RefundModal({ person = {}, onConfirm, onClose, error = "
     };
   }, []);
 
-  const canConfirm = amount > 0 && amount <= max && selectedMethodId && !submitting;
+  // El tope sale de la cola en vivo (ReceptionCheckinPage lo recalcula en cada render), así que
+  // puede bajar mientras el modal está abierto; `amount` es lo último que se tecleó y podría
+  // quedar por encima. Se recorta al mostrar y al enviar, en vez de dejar el botón apagado sin
+  // explicación.
+  const safeAmount = Math.min(amount, max);
+  const canConfirm = safeAmount > 0 && Boolean(selectedMethodId) && !submitting;
 
   // `onConfirm` (handleConfirmRefund del padre) hoy nunca rechaza — captura sus propios errores y
   // solo actualiza `error` — así que no se puede distinguir éxito de fallo por try/catch acá. Si
@@ -52,7 +72,7 @@ export default function RefundModal({ person = {}, onConfirm, onClose, error = "
     if (!canConfirm) return;
     setSubmitting(true);
     try {
-      await onConfirm(amount, selectedMethodId);
+      await onConfirm(safeAmount, selectedMethodId);
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
@@ -77,24 +97,32 @@ export default function RefundModal({ person = {}, onConfirm, onClose, error = "
           </button>
         </div>
         <p className="text-neutral-500 text-sm mb-4">
-          {person.name || person.firstName || "Alumno"} · saldo a favor {formatCOP(max)}
+          {person.name || person.firstName || "Alumno"} · máximo a devolver {formatCOP(max)}
         </p>
 
         <div className="space-y-3 mb-4">
           <div>
             <label className="text-neutral-400 text-xs font-medium">Método de devolución</label>
             <select
-              value={selectedMethodId}
+              value={selectedMethodId ?? ""}
               onChange={(e) => setSelectedMethodId(Number(e.target.value))}
-              disabled={submitting}
+              disabled={submitting || methodsLoading || paymentMethods.length === 0}
               className="w-full mt-1 bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-sky-500 disabled:opacity-50"
             >
+              {methodsLoading && <option value="">Cargando…</option>}
+              {!methodsLoading && paymentMethods.length === 0 && <option value="">Sin métodos activos</option>}
               {paymentMethods.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>
               ))}
             </select>
+            {!methodsLoading && (methodsError || paymentMethods.length === 0) && (
+              <p className="text-amber-400 text-[11px] mt-1">
+                {methodsError ||
+                  "No hay ningún método de pago activo. Pide a un administrador que active al menos uno."}
+              </p>
+            )}
           </div>
 
           <div>
@@ -102,7 +130,7 @@ export default function RefundModal({ person = {}, onConfirm, onClose, error = "
             <input
               type="text"
               inputMode="numeric"
-              value={amount.toLocaleString("es-CO")}
+              value={safeAmount.toLocaleString("es-CO")}
               disabled={submitting}
               onChange={(e) => {
                 const raw = e.target.value.replace(/\D/g, "");

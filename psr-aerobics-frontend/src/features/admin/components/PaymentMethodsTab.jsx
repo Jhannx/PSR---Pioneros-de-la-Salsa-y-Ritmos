@@ -16,7 +16,8 @@ export default function PaymentMethodsTab({ readOnly = false }) {
     setLoading(true);
     setError("");
     try {
-      const data = await paymentsService.getPaymentMethods();
+      // Todos, activos e inactivos: esta pestaña es donde se activan y desactivan.
+      const data = await paymentsService.getAllPaymentMethods();
       setMethods(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err.data?.message || err.message || "No se pudo cargar los métodos de pago.");

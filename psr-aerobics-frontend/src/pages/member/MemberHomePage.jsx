@@ -1,20 +1,21 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, UserCheck, Cake } from "lucide-react";
 import { getInitialsFromFullName } from "../../utils/text";
 import { formatCOP } from "../../utils/currency";
 import { formatBirthDate } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
-import { useMockData } from "../../context/DataContext";
 import { peopleService } from "../../services/peopleService";
 import { paymentsService } from "../../services/paymentsService";
 import { queueService } from "../../services/queueService";
 
 export default function MemberHomePage() {
   const { user } = useAuth();
-  const { queue } = useMockData();
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState("");
   const [checkingIn, setCheckingIn] = useState(false);
+  // Mientras se consulta la llegada de hoy no se muestra el botón: verlo un instante y que
+  // desaparezca (o peor, pulsarlo) sería el mismo defecto que se está corrigiendo.
+  const [checkinLoading, setCheckinLoading] = useState(true);
   // Resultado de POST /api/checkin/propio — turno real que devuelve el backend. Antes el botón
   // llamaba a POST /api/cola con { personId }, que para un MIEMBRO da 403 a propósito: ese
   // endpoint recibe el personId en el cuerpo, así que abrirlo dejaría que cualquier miembro
@@ -26,12 +27,20 @@ export default function MemberHomePage() {
   // carga: mostrar una cifra vieja un instante es peor que no mostrar ninguna.
   const [pricing, setPricing] = useState(null);
 
-  useEffect(() => {
-    if (!user?.personId) return;
-    peopleService.getProfile(user.personId)
+  // El perfil trae las sesiones pagadas por adelantado (`availableCreditDays`). Se relee también al
+  // marcar la llegada: si la sesión estaba cubierta por crédito el servidor ya confirmó la asistencia
+  // y descontó una, y el contador tiene que bajar sin recargar la página.
+  const personId = user?.personId;
+  const loadProfile = useCallback(() => {
+    if (!personId) return Promise.resolve();
+    return peopleService.getProfile(personId)
       .then(setProfile)
       .catch((err) => setError(err.data?.message || err.message || "No fue posible cargar tu perfil."));
-  }, [user?.personId]);
+  }, [personId]);
+
+  useEffect(() => {
+    Promise.resolve().then(loadProfile);
+  }, [loadProfile]);
 
   useEffect(() => {
     paymentsService.getPricing()
@@ -50,22 +59,69 @@ export default function MemberHomePage() {
   // lo expone con ese nombre, no hace falta pedir nada nuevo.
   const creditDays = profile?.availableCreditDays ?? null;
 
-  // `queue` (GET /api/cola/admin) solo responde para roles de personal — para un MIEMBRO puro
-  // llega vacía en silencio (DataContext.refreshData descarta el 403 con Promise.allSettled).
-  // Sigue siendo útil para una cuenta que además tiene rol de personal (ej. ADMIN viendo su
-  // propio panel de miembro), así que se conserva como fuente de verdad cuando está disponible.
-  const memberQueueItem = queue.find((p) => p.personId === user?.personId);
-  const isPaidToday = memberQueueItem ? Number(memberQueueItem.amountApplied || memberQueueItem.amountCharged || 0) > 0 : false;
-  const isAttendedToday = memberQueueItem ? memberQueueItem.attended : !!myCheckin;
+  // La llegada de hoy sale del servidor (`GET /api/checkin/propio`), no de la cola de personal ni
+  // de memoria: antes solo se recordaba en el estado de la pantalla, así que un F5 la borraba y
+  // volvía el botón "Marcar mi llegada" (docs/correciones 20-09.md). `myCheckin` es null si hoy no
+  // marcó llegada (204).
+  //
+  // Una llegada de hoy cuya sesión ya TERMINÓ o se CANCELÓ (`sessionStatus` del servidor, sin
+  // comparar horas acá) sigue siendo "la llegada de hoy": antes se ignoraba y volvía el botón
+  // "Marcar mi llegada" como si no hubiera marcado nada — justo el síntoma reportado (docs/correciones
+  // 20-09.md, 2ª ronda: "vuelve el marcar mi asistencia hoy"). Ahora se muestra que ya marcó, y solo
+  // se ofrece marcar OTRA aparte, por si hay una clase más tarde.
+  const pastCheckin = myCheckin && ["ENDED", "CANCELLED"].includes(myCheckin.sessionStatus) ? myCheckin : null;
+  const checkin = myCheckin && !pastCheckin ? myCheckin : null;
+  // Dos cosas distintas, que antes se mezclaban en una sola: tener la LLEGADA registrada
+  // (`isCheckedInToday`) y que recepción ya haya CONFIRMADO la asistencia (`isAttendedToday`).
+  const isCheckedInToday = Boolean(checkin);
+  const isAttendedToday = Boolean(checkin?.attended);
+  // El estado de pago de hoy lo dice el servidor (`paymentStatus` en la respuesta del check-in propio,
+  // NOTAS-PARA-FRONTEND.md Bloque 5, punto 6), sin deducirlo de los días de crédito:
+  //   PAGADA_POR_ADELANTADO → "tu sesión ya está paga, puedes pasar directo"
+  //   PAGADA                → asistencia confirmada y sin deuda
+  //   PENDIENTE             → tiene que pagar `amountDue` en recepción
+  const paymentStatus = isCheckedInToday ? (checkin.paymentStatus ?? null) : null;
+  const canPassThrough = paymentStatus === "PAGADA_POR_ADELANTADO" || paymentStatus === "PAGADA";
+  const amountDueToday = Number(checkin?.amountDue) > 0 ? Number(checkin.amountDue) : 0;
+  const isPaidToday = paymentStatus ? paymentStatus !== "PENDIENTE" : Number(checkin?.amountCharged || 0) > 0;
+
+  const [checkinError, setCheckinError] = useState("");
+
+  const loadOwnCheckin = useCallback(async () => {
+    setCheckinError("");
+    try {
+      const result = await queueService.getOwnCheckin();
+      setMyCheckin(result);
+    } catch (err) {
+      // 403 = una cuenta sin rol de miembro que igual abrió esta pantalla: no hay nada que mostrar.
+      // Cualquier otro fallo SE MUESTRA: antes se tragaba en silencio y, al fallar la consulta, la
+      // pantalla se veía como "no has marcado" aunque sí lo hubiera hecho — indistinguible del defecto
+      // que se intentaba arreglar.
+      if (err.status !== 403) {
+        console.warn("No se pudo consultar la llegada de hoy:", err);
+        setCheckinError(err.data?.message || err.message || "No se pudo consultar tu llegada de hoy.");
+      }
+    } finally {
+      setCheckinLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    Promise.resolve().then(loadOwnCheckin);
+  }, [loadOwnCheckin]);
 
   async function handleMarkAttendance() {
-    if (!user?.personId || checkingIn || memberQueueItem || myCheckin) return;
+    if (!user?.personId || checkingIn || checkin) return;
     setCheckingIn(true);
     setError("");
     try {
+      // Repetible: 201 si se registró ahora, 200 si ya la tenía (misma respuesta, no una segunda).
       const result = await queueService.checkinPropio();
       setMyCheckin(result);
+      await loadProfile();
     } catch (err) {
+      // Fuera de horario el servidor responde con un mensaje listo para mostrar tal cual
+      // ("No hay ninguna clase programada en este momento").
       setError(err.data?.message || err.message || "No fue posible registrar la llegada.");
     } finally {
       setCheckingIn(false);
@@ -117,16 +173,17 @@ export default function MemberHomePage() {
             )}
           </div>
 
-          {/* Días de crédito disponible — reemplaza la franja semanal de asistencias falsas. */}
+          {/* Sesiones pagadas por adelantado — reemplaza la franja semanal de asistencias falsas. Son
+              SESIONES, no días: si un día hay dos clases, cada una descuenta una. */}
           {creditDays !== null && (
             <div className="mt-6">
               <p className="text-neutral-500 text-xs font-semibold uppercase tracking-wide mb-3 text-center">
-                Días de crédito disponible
+                Sesiones pagadas por adelantado
               </p>
               <div className="flex items-center justify-center gap-2 bg-neutral-950 border border-neutral-800 rounded-2xl p-4">
                 <span className="text-3xl font-bold text-emerald-400">{creditDays}</span>
                 <span className="text-neutral-500 text-sm">
-                  {creditDays === 1 ? "día pagado por adelantado" : "días pagados por adelantado"}
+                  {creditDays === 1 ? "sesión disponible" : "sesiones disponibles"}
                 </span>
               </div>
             </div>
@@ -134,17 +191,55 @@ export default function MemberHomePage() {
 
           {/* Attendance Action */}
           <div className="mt-6 pt-4 border-t border-neutral-800">
-            {isAttendedToday ? (
+            {checkinLoading ? (
+              <div className="h-[52px] rounded-2xl bg-neutral-800/50 animate-pulse" aria-label="Consultando tu llegada de hoy" />
+            ) : isCheckedInToday ? (
               <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-4 rounded-2xl text-center flex flex-col items-center justify-center gap-1.5 font-semibold text-sm">
                 <span className="flex items-center gap-2">
                   <UserCheck size={18} />
-                  ¡Tu asistencia de hoy está registrada!
+                  {isAttendedToday ? "¡Tu asistencia de hoy está confirmada!" : "¡Tu llegada de hoy está registrada!"}
                 </span>
-                {myCheckin?.queuePosition != null && (
-                  <span className="text-emerald-300/80 text-xs font-normal">
-                    Tu turno en la fila de hoy: #{myCheckin.queuePosition}
+                {/* Con la sesión ya paga (por adelantado o cobrada) solo se dice que puede pasar directo:
+                    el turno de la fila no le sirve y confunde. */}
+                {canPassThrough ? (
+                  <span className="text-emerald-200 text-xs font-semibold mt-1">
+                    Tu sesión de hoy ya está paga — puedes pasar directo a la clase.
                   </span>
+                ) : (
+                  <>
+                    {!isAttendedToday && checkin?.queuePosition != null && (
+                      <span className="text-emerald-300/80 text-xs font-normal">
+                        Tu turno en la fila de hoy: #{checkin.queuePosition}
+                      </span>
+                    )}
+                    {amountDueToday > 0 && (
+                      <span className="text-amber-300 text-xs font-semibold mt-1">
+                        Te falta pagar {formatCOP(amountDueToday)} en recepción.
+                      </span>
+                    )}
+                  </>
                 )}
+              </div>
+            ) : pastCheckin ? (
+              // Ya marcó hoy, pero esa sesión ya no cuenta (terminó o se canceló): se le dice que ya
+              // marcó y solo se ofrece marcar OTRA, aparte — no vuelve el botón como si nada.
+              <div className="bg-neutral-800/60 border border-neutral-700 p-4 rounded-2xl text-center text-sm">
+                <p className="text-neutral-200 font-semibold flex items-center justify-center gap-2">
+                  <UserCheck size={18} className="text-emerald-400" />
+                  Ya marcaste tu llegada hoy
+                </p>
+                <p className="text-neutral-500 text-xs mt-1">
+                  {pastCheckin.sessionStatus === "CANCELLED"
+                    ? "Esa sesión se canceló."
+                    : "Esa sesión ya terminó."}
+                </p>
+                <button
+                  onClick={handleMarkAttendance}
+                  disabled={checkingIn}
+                  className="mt-3 text-xs font-semibold text-emerald-400 hover:text-emerald-300 underline underline-offset-2 disabled:opacity-50"
+                >
+                  {checkingIn ? "Registrando…" : "Marcar llegada a otra sesión de hoy"}
+                </button>
               </div>
             ) : (
               <button
@@ -155,6 +250,23 @@ export default function MemberHomePage() {
                 <UserCheck size={18} />
                 {checkingIn ? "Registrando…" : "Marcar mi llegada hoy"}
               </button>
+            )}
+
+            {/* La consulta de la llegada de hoy falló: se dice, en vez de dejar el botón como si no
+                hubiera marcado nada. */}
+            {checkinError && !checkinLoading && (
+              <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+                <p>
+                  No pudimos consultar si ya marcaste tu llegada hoy ({checkinError}). Si ya la marcaste, es posible
+                  que no se vea aquí.
+                </p>
+                <button
+                  onClick={loadOwnCheckin}
+                  className="mt-1 font-semibold text-amber-200 hover:text-white underline underline-offset-2"
+                >
+                  Reintentar
+                </button>
+              </div>
             )}
           </div>
         </div>

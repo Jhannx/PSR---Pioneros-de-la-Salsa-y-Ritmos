@@ -27,6 +27,7 @@ import ReceptionCheckinPage from "./pages/reception/ReceptionCheckinPage";
 import PeopleListPage from "./pages/reception/PeopleListPage";
 
 import SessionsPage from "./pages/admin/SessionsPage";
+import TeacherSessionsPage from "./pages/teacher/TeacherSessionsPage";
 import SchedulePage from "./pages/admin/SchedulePage";
 import ReportsPage from "./pages/admin/ReportsPage";
 import AuditPage from "./pages/admin/AuditPage";
@@ -138,6 +139,15 @@ export default function App() {
                 element={
                   <ProtectedRoute allowedRoles={["RECEPTIONIST", "TEACHER"]}>
                     <SessionsPage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Rutas del Profesor: sus propias sesiones de la semana */}
+              <Route
+                path="/teacher/sessions"
+                element={
+                  <ProtectedRoute allowedRoles={["TEACHER"]}>
+                    <TeacherSessionsPage />
                   </ProtectedRoute>
                 }
               />

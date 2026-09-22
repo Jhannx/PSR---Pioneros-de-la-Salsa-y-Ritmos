@@ -58,7 +58,7 @@ export const ROLE_META = {
 export const HOME_BY_ROLE = {
   ADMIN: "/admin/reports",
   RECEPTIONIST: "/reception/checkin",
-  TEACHER: "/reception/checkin",
+  TEACHER: "/teacher/sessions",
   PSR_TERMINAL: "/lobby/panel",
   MEMBER: "/member/home",
 };
@@ -87,6 +87,9 @@ export const NAV_BY_ROLE = {
     { path: "/reception/settings", label: "Configuración", icon: Settings },
   ],
   TEACHER: [
+    // Sus propias sesiones de la semana — hasta ahora asignar un profesor no tenía ningún efecto
+    // visible: no había pantalla donde el profesor viera las suyas (docs/correciones 20-09.md).
+    { path: "/teacher/sessions", label: "Mis Sesiones", icon: GraduationCap },
     { path: "/reception/checkin", label: "Sesión - Aeróbicos", icon: UserCheck },
     { path: "/reception/people", label: "Personas registradas", icon: Users },
     { path: "/reception/sessions", label: "Sesiones de Clase", icon: Calendar },
@@ -107,6 +110,11 @@ export const NAV_BY_ROLE = {
 
 // Todos los roles conocidos, en el orden en que se muestran en el selector.
 export const ALL_ROLES = ["ADMIN", "RECEPTIONIST", "TEACHER", "MEMBER", "PSR_TERMINAL"];
+
+// Roles de personal: los únicos que pueden leer la cola de administración, la lista de personas y
+// las sesiones (los mismos que ya listan las rutas de recepción en App.jsx). Un MIEMBRO o la
+// terminal no — para ellos esas lecturas responden 403. `DataContext` lo usa para no pedirlas.
+export const STAFF_ROLES = ["ADMIN", "RECEPTIONIST", "TEACHER"];
 
 // Rutas neutras: de cualquier persona autenticada con personId, sin importar el rol activo —
 // aparecen en el sidebar de más de un rol (ver AppLayout.getNavItems) pero no "pertenecen" a

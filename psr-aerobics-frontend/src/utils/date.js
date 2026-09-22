@@ -76,6 +76,8 @@ export function toOffsetDateTime(dateStr, timeStr) {
 // errores-nuevo-compartido.md #1. `Date` ya interpreta el offset/`Z` del string al convertir a
 // hora local, así que basta con formatear con `toLocaleTimeString`.
 export function formatTimeOfDay(isoDateTimeStr) {
+  // Una sesión sin hora de fin (`endTime` null) no debe salir como la hora 0 de 1970.
+  if (!isoDateTimeStr) return "";
   return new Date(isoDateTimeStr).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" });
 }
 

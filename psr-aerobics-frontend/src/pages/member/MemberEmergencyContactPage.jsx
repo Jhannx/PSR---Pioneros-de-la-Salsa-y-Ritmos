@@ -19,6 +19,33 @@ const CONDITION_CHIPS = [
 
 const MAX_CONTACTS = 5;
 
+// Qué vista abrir para mostrar lo que ya está guardado (docs/correciones 20-09.md: "observaciones de
+// salud no guarda los datos, siempre al recargarse se elimina lo digitado"). Los datos SÍ estaban
+// guardados; el defecto era de esta pantalla: siempre abría en "Elegir de una lista" (chips) y lo
+// guardado solo se cargaba en el campo de texto libre, que quedaba oculto — se veía vacío. Peor: al
+// estar vacío el chip, `healthValueToSave` daba "" ≠ lo guardado, así que "Guardar observaciones"
+// quedaba habilitado y pulsarlo BORRABA lo que había.
+//
+// Se abre en chips solo si lo guardado se reconstruye EXACTO con ellos (chips conocidos, más un
+// "otro" opcional, unidos con ", " — como los compone esta misma pantalla al guardar); en cualquier
+// otro caso, en texto libre con el valor completo. Así nunca se muestra algo distinto de lo guardado
+// ni se marca como "modificado" sin que nadie haya tocado nada.
+function parseSavedHealth(value) {
+  const text = (value || "").trim();
+  if (!text) return { mode: "chips", chips: [], other: "", text: "" };
+
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+  const chips = parts.filter((part) => CONDITION_CHIPS.includes(part));
+  const other = parts.filter((part) => !CONDITION_CHIPS.includes(part)).join(", ");
+  const rebuilt = [...chips, other].filter(Boolean).join(", ");
+  const noneWithOthers = chips.includes("Ninguna condición conocida") && (chips.length > 1 || other);
+
+  // `chips.length > 0`: si no hay ningún chip conocido, es texto libre — el campo "Otro" es de una
+  // sola línea y no sirve para un párrafo.
+  if (chips.length > 0 && rebuilt === text && !noneWithOthers) return { mode: "chips", chips, other, text };
+  return { mode: "texto", chips: [], other: "", text };
+}
+
 const inputClass =
   "w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 text-white text-base placeholder-neutral-600 outline-none focus:border-emerald-500 transition-colors";
 
@@ -113,8 +140,14 @@ export default function MemberEmergencyContactPage({ onBack }) {
 
         if (profile.status === "fulfilled") {
           const value = profile.value?.healthObservations || "";
-          setSavedHealthValue(value);
-          setFreeText(value);
+          const saved = parseSavedHealth(value);
+          // Recortado, igual que lo que se compara después (`healthValueToSave` ya sale recortado):
+          // con espacios sobrantes en el valor guardado, la pantalla se marcaba "modificada".
+          setSavedHealthValue(saved.text);
+          setHealthMode(saved.mode);
+          setSelectedChips(saved.chips);
+          setOtherText(saved.other);
+          setFreeText(saved.text);
         } else {
           // Antes esto fallaba en silencio (errores-12sep-front.md #2): un 500 de
           // GET /api/personas/{id}/perfil dejaba el campo de observaciones vacío sin avisar,
