@@ -1,8 +1,47 @@
-# Node
+# ==========================================
+# Node / Vite / Frontend
+# ==========================================
+
 node_modules/
 dist/
 dist-ssr/
 *.local
+
+# ==========================================
+# Java / Maven / Spring Boot / Backend
+# ==========================================
+
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# ==========================================
+# IDEs / Editores
+# ==========================================
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse / Spring Tool Suite
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/nbdist/
+/.nb-gradle/
+build/
+
+# VS Code
+.vscode/
 
 # Otros editores
 *.suo
@@ -10,17 +49,66 @@ dist-ssr/
 *.njsproj
 *.sln
 *.sw?
- 
-# Docs contextuales
+
+# ==========================================
+# Variables de entorno
+# ==========================================
+
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Logs
+# ==========================================
+
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==========================================
+# Sistema operativo
+# ==========================================
+
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Docker
+# ==========================================
+
+docker-compose.override.yml
+
+# ==========================================
+# Documentación / Archivos contextuales
+# ==========================================
+
 docs/
+HELP.md
 
 # ==========================================
-# Archivos externos a este repositorio Front
+# Archivos temporales
 # ==========================================
 
-# Copia local/inservible del Backend
-PSR - Backend/
+*.tmp
+*.temp
 
-# Archivos personales
+# ==========================================
+# Material externo / personal
+# ==========================================
+
+Otros/
+Pag web/
+
 A Color 1.docx
 problemas.txt
+
+# ==========================================
+# Ejemplos / archivos de desarrollo
+# ==========================================
+
+example-impl/
