@@ -87,7 +87,6 @@ docker-compose.override.yml
 # Documentación / Archivos contextuales
 # ==========================================
 
-docs/
 HELP.md
 
 # ==========================================

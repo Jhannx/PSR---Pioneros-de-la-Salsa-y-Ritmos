@@ -24,4 +24,4 @@ dist-ssr
 *.sw?
 
 # Docs contextuales (notas internas, no se versionan)
-docs/
+
