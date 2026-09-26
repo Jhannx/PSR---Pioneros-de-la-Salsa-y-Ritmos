@@ -305,3 +305,37 @@ $0": confirmar la asistencia y dejar la deuda completa, sin tener que inventar u
 **Anotado el 21-sep.** Al lanzar, el botón lo ven ADMIN, RECEPCIÓN y PROFESOR mientras haya una clase en curso.
 Para el segundo lanzamiento: que lo vea solo el **profesor asignado a esa sesión** (y el admin), lo que necesita que el back
 mande `canClose` por sesión según quien pregunta (ya anotado en 10.B1).
+
+## 14. La TV de la fila ignora "personas por turno" de Configuración
+
+**Anotado el 26-sep (a horas del deploy).** El dueño pidió llamar de a **1** persona. En Configuración de la
+cola el valor ya estaba en 1, pero la TV (`/lobby/queue`) seguía llamando de a 2.
+
+**Causa:**
+
+- `LobbyQueueDisplayPage.jsx` recibe `peoplePerTurn` como prop con valor por defecto fijo, y la ruta de
+  `App.jsx` lo monta sin pasarle nada (`<LobbyQueueDisplayPage />`). La TV **nunca** consulta
+  `GET /api/cola/configuracion`; ese valor solo lo lee y guarda `QueueConfigTab.jsx`.
+- Aunque la TV lo pidiera, `QueueConfigController` exige `Authorities.STAFF` (ADMIN, TEACHER,
+  RECEPTIONIST). Si la TV corre con la cuenta de la Terminal PSR (`PSR_TERMINAL`) recibiría 403. El
+  comentario del propio controlador dice "La sala necesita leerla", así que el permiso quedó corto;
+  `/api/cola/espera` y `/api/cola/prepagada` sí usan `TERMINAL_QUEUE`.
+
+**Parche de v1:** el valor por defecto pasó de 2 a **1** en `LobbyQueueDisplayPage.jsx`. Si se cambia en
+Configuración, la TV **no** se entera: hay que cambiar el código.
+
+**Corrección propuesta para v2:**
+
+- *Frontend* (`LobbyQueueDisplayPage.jsx`): quitar el número fijo; leer `peoplePerTurn` de
+  `GET /api/cola/configuracion` al cargar y volver a leerlo en cada señal del WebSocket (la misma que ya
+  relee las listas), para que un cambio del admin se vea sin recargar la TV. Si la lectura falla, usar 1 y
+  dejar el error en consola.
+- *Backend* (`QueueConfigController`): el `GET` pasa a `Authorities.TERMINAL_QUEUE` (incluye
+  `PSR_TERMINAL`); el `PUT` sigue solo para ADMIN. La respuesta no tiene datos sensibles (personas por
+  turno y dos valores en minutos).
+- *Opcional:* que guardar la configuración emita una señal por WebSocket (`/topic/cola/espera`) para que la
+  TV la relea al instante, en vez de esperar al próximo movimiento de la fila.
+- *Pendiente de confirmar:* con qué cuenta se abre la TV del local (Terminal PSR o admin/recepción).
+
+**Probar:** abrir la TV con la cuenta real del local, confirmar que llama de a 1, cambiar a 2 en
+Configuración y ver que la TV se ajusta sola.

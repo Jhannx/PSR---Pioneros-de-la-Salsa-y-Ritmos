@@ -6,7 +6,8 @@ import { useNavigate } from "react-router-dom";
 import { createQueueSocketClient } from "../../services/websocketService";
 import { queueService } from "../../services/queueService";
 
-export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
+// Fijo en 1 por decisión del dueño. Pendiente leerlo de /api/cola/configuracion (ver docs/mejoras-v2.md).
+export default function LobbyQueueDisplayPage({ peoplePerTurn = 1 }) {
   const now = useClock();
   const navigate = useNavigate();
 
@@ -172,18 +173,18 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
           </div>
         </div>
 
-        {/* Sección 2: Prepagados (Pasan Directo) */}
+        {/* Sección 2: Prepagados (Pasan Directo · solo pagos hechos en recepción) */}
         {hasPrepaid && (
           <div className="lg:col-span-4 bg-emerald-950/20 border border-emerald-500/40 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-lg font-bold text-emerald-300">Pasan Directo (Prepagados)</h2>
+                <h2 className="text-lg font-bold text-emerald-300">Pasan Directo · Pagado en Recepción</h2>
                 <span className="text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
                   {prepaidList.length} persona(s)
                 </span>
               </div>
               <p className="text-emerald-300/80 text-xs mb-3">
-                Sin pasar por recepción. Ingresan directo a la sala.
+                Solo quienes dejaron su clase pagada en recepción con anticipación. Ingresan directo a la sala.
               </p>
 
               <div className="space-y-2">
@@ -229,6 +230,9 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 2 }) {
             </div>
             <p className="text-neutral-400 text-xs mb-3">
               Permanece en sala de espera hasta escuchar tu llamado.
+            </p>
+            <p className="text-neutral-300 text-xs mb-3 bg-neutral-800/50 border border-neutral-700 rounded-xl px-3 py-2">
+              <span className="font-bold text-white">¿Pagaste por transferencia?</span> Haz la fila normal: recepción verifica tu pago al llamarte.
             </p>
 
             {remainingQueue.length === 0 ? (
