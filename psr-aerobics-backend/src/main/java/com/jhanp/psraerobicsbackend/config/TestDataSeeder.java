@@ -1,7 +1,5 @@
 package com.jhanp.psraerobicsbackend.config;
 
-import com.jhanp.psraerobicsbackend.modules.aerobics.schedule.entity.Schedule;
-import com.jhanp.psraerobicsbackend.modules.aerobics.schedule.repository.ScheduleRepository;
 import com.jhanp.psraerobicsbackend.modules.person.enums.DocumentType;
 import com.jhanp.psraerobicsbackend.modules.person.enums.RegistrationSource;
 import com.jhanp.psraerobicsbackend.modules.person.repository.PersonProcedureRepository;
@@ -23,12 +21,17 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.List;
 
 /**
  * Siembra datos de prueba al arrancar: cinco cuentas por rol, los casos raros que conviene tener
- * siempre a mano, la cuenta técnica de la terminal y un cuadro de horarios.
+ * siempre a mano y la cuenta técnica de la terminal.
+ * <p>
+ * <b>Ya no siembra horarios.</b> Se fueron a {@link ProductionAccountsSeeder} el 28-09-2026: eran el
+ * único dato de operación real que vivía aquí, y eso ataba la agenda a una bandera que en producción
+ * tiene que estar apagada. Tenerlos en los dos sitios tampoco valía: los de aquí eran de lunes a
+ * viernes a las 18:00 y los reales son de lunes a jueves a las 19:00, así que en local habrían
+ * convivido dos agendas distintas y ninguna prueba se habría parecido a producción.
  * <p>
  * Resuelve el problema del huevo y la gallina: toda cuenta nace con rol MIEMBRO
  * (sp_registrar_usuario_para_persona) y ascender a alguien exige ser ADMIN, así que en una base recién
@@ -42,7 +45,7 @@ import java.util.List;
  * Solo corre con {@code app.seed.enabled=true}. Déjalo apagado fuera de tu máquina: crea cuentas con
  * contraseñas conocidas, que es exactamente lo que no quieres en un entorno real.
  * <p>
- * Es idempotente: si la persona o el horario ya existen, no los toca. Se puede reiniciar sin miedo.
+ * Es idempotente: si la persona ya existe, no la toca. Se puede reiniciar sin miedo.
  */
 @Component
 @ConditionalOnProperty(name = "app.seed.enabled", havingValue = "true")
@@ -58,7 +61,6 @@ public class TestDataSeeder implements ApplicationRunner {
     private final UserProcedureRepository userProcedureRepository;
     private final UserRepository userRepository;
     private final UserRoleProcedureRepository userRoleProcedureRepository;
-    private final ScheduleRepository scheduleRepository;
     private final PasswordEncoder passwordEncoder;
 
     /**
@@ -125,14 +127,6 @@ public class TestDataSeeder implements ApplicationRunner {
             // autoridades a la vez y los endpoints de ambos roles responden en la misma sesión.
             new SeedPerson("9999", "Elena", "Vargas", RoleName.ADMIN, RoleName.TEACHER));
 
-    /** Lunes a viernes, una franja por día. Suficiente para que la agenda no salga vacía. */
-    private static final List<int[]> SCHEDULES = List.of(
-            new int[]{1, 18, 0, 19, 0},
-            new int[]{2, 18, 0, 19, 0},
-            new int[]{3, 18, 0, 19, 0},
-            new int[]{4, 19, 0, 20, 0},
-            new int[]{5, 19, 0, 20, 0});
-
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
@@ -140,7 +134,6 @@ public class TestDataSeeder implements ApplicationRunner {
 
         PEOPLE.forEach(this::seedPerson);
         seedTerminal();
-        SCHEDULES.forEach(this::seedSchedule);
 
         log.warn("Datos de prueba listos. La contraseña de cada cuenta es su número de documento.");
     }
@@ -255,32 +248,5 @@ public class TestDataSeeder implements ApplicationRunner {
         return Normalizer.normalize(text, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "")
                 .replaceAll("\\s+", "");
-    }
-
-    /**
-     * El horario se identifica por día + hora de inicio, que es lo que lo hace único en la práctica:
-     * sin este control, cada reinicio añadiría otro cuadro idéntico encima del anterior.
-     */
-    private void seedSchedule(int[] seed) {
-        int dayOfWeek = seed[0];
-        LocalTime startTime = LocalTime.of(seed[1], seed[2]);
-        LocalTime endTime = LocalTime.of(seed[3], seed[4]);
-
-        boolean exists = scheduleRepository
-                .findByDayOfWeekAndActiveTrueOrderByStartTimeAsc(dayOfWeek).stream()
-                .anyMatch(existing -> existing.getStartTime().equals(startTime));
-
-        if (exists) {
-            log.debug("El horario del día {} a las {} ya existe; el seed no lo toca", dayOfWeek, startTime);
-            return;
-        }
-
-        scheduleRepository.save(Schedule.builder()
-                .dayOfWeek(dayOfWeek)
-                .startTime(startTime)
-                .endTime(endTime)
-                .active(true)
-                .build());
-        log.info("Horario de prueba creado: día {} de {} a {}", dayOfWeek, startTime, endTime);
     }
 }

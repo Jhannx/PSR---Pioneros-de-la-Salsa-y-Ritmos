@@ -99,20 +99,50 @@ porque la decisión tomada es que la política se queda en v1 única, sin sistem
 *el mismo día*: las filas nuevas quedan marcadas con lo que diga esta variable, así que dejarla atrás
 hace que gente que aceptó la v2 conste como si hubiera aceptado la v1. Las filas viejas no se tocan.
 
+## Seed de producción
+
+| Variable | Por defecto | Notas |
+|---|---|---|
+| `SEED_PRODUCTION_ENABLED` | `true` | Admin de arranque, 3 terminales PSR, cuentas Invitado y Menor de edad, y la agenda (lunes–jueves 19:00–20:00) |
+| `ADMIN_EMAIL` | `adminpsraerobicos@gmail.com` | |
+| `ADMIN_PASSWORD` | `adminrootpsraerobicos` | **Cámbiala en el primer login.** |
+
+Este sí viene **encendido** por defecto, al contrario que los dos de abajo, y no es un descuido: sin
+el admin no hay por dónde entrar a crear las cuentas reales, y sin horarios no hay clase a la que
+llegar. Un despliegue al que se le olvide la variable arranca usable.
+
+Las credenciales también tienen valor por defecto a propósito. Si fueran obligatorias, un despliegue
+sin definirlas arrancaría **sin ningún admin** y el sistema quedaría cerrado por fuera. Una
+contraseña conocida se cambia desde la aplicación; un sistema sin admin, no.
+
+⚠️ **Cambiar `ADMIN_EMAIL` no renombra al admin que ya existe.** La siembra es idempotente por
+correo: apuntarlo a otra dirección sobre una base ya sembrada crea un **segundo** admin y deja el
+primero intacto, con su contraseña vieja. Para cambiar de correo de verdad hay que desactivar el
+viejo a mano.
+
+Se apaga cuando las cuentas reales ya existen, o para levantar la app contra una base ajena sin
+escribir en ella.
+
 ## Seed de prueba
 
 | Variable | Por defecto |
 |---|---|
-| `SEED_ENABLED` | **`true`** |
+| `SEED_ENABLED` | `false` |
 | `SEED_HISTORICAL_ENABLED` | `false` |
 
-⚠️ **El valor por defecto es `true`, no `false`.** Este documento decía lo contrario y estaba mal.
-Importa: si se despliega sin definir la variable, el seed corre y crea cuentas con contraseñas
-conocidas. **Hay que ponerla explícitamente en `false` fuera de tu máquina** — no basta con no
-definirla.
+Los dos vienen apagados: sin definir nada, un despliegue no siembra ni una cuenta de prueba.
 
-Crea una cuenta por rol con la contraseña igual al número de documento, más la cuenta técnica `terminal@psraerobicos.com` / `Terminal2026!` con rol `PSR_TERMINAL`. Resuelve que en una base
-recién migrada no exista ningún ADMIN con el que entrar.
+⚠️ **`SEED_ENABLED` venía en `true` hasta el 28-09-2026** y este documento avisaba de ello. Cambió a
+`false`: el único motivo del `true` era que en una base recién migrada no hubiera ningún ADMIN con el
+que entrar, y eso ahora lo cubre `ProductionAccountsSeeder`, que corre siempre y sin bandera. Si
+despliegas contra una base donde ya corrió el seed viejo, sus cuentas siguen ahí — hay que
+desactivarlas a mano.
+
+Crea una cuenta por rol con la contraseña igual al número de documento, más la cuenta técnica
+`terminal@psraerobicos.com` / `Terminal2026!` con rol `PSR_TERMINAL`.
+
+**Encenderlo en local tiene un motivo extra:** es el único que siembra los horarios de lunes a
+viernes. Sin él la agenda arranca vacía y hay que crear los horarios desde la pantalla de admin.
 
 **Debe quedar en `false` fuera de tu máquina:** son credenciales conocidas.
 

@@ -339,3 +339,25 @@ Configuración, la TV **no** se entera: hay que cambiar el código.
 
 **Probar:** abrir la TV con la cuenta real del local, confirmar que llama de a 1, cambiar a 2 en
 Configuración y ver que la TV se ajusta sola.
+
+## 15. Sesión de 30 días sin renovación: volver a un token corto con refresh
+
+**Anotado el 28-sep.** El token de sesión duraba 1 hora y no hay renovación automática, así que la TV de la
+fila y recepción volvían al login cada hora. Para v1 se subió `jwt.expiration-in-ms` a **30 días**
+(`2592000000`) en `application.properties` del backend. Es provisional.
+
+**Riesgos de dejarlo así:**
+
+- Cerrar sesión solo borra el token del navegador; el token sigue siendo válido 30 días. Si alguien lo copia,
+  puede usarlo hasta que venza.
+- Mitiga en parte que el backend relee el usuario de la base en cada petición: una cuenta desactivada o sin el
+  rol deja de tener acceso aunque su token no haya vencido.
+
+**Para v2:**
+
+- Backend: `POST /api/auth/refresh` y `POST /api/auth/logout`, un *refresh token* guardado (y revocable) y
+  `expiresIn` en la respuesta de login. Volver el token de acceso a algo corto (15–60 min).
+- Frontend: encender `VITE_AUTH_REFRESH_ENABLED=true` (el código ya está en `apiClient.js` / `AuthContext.jsx`).
+- **Ojo:** no activar el refresh con el token de 30 días. `scheduleProactiveRefresh` usa `setTimeout`, que en el
+  navegador no acepta esperas de más de ~24,8 días: con 30 días dispararía la renovación de inmediato, en bucle.
+  El token de acceso tiene que volver a ser corto antes de encender la bandera.

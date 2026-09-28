@@ -482,7 +482,11 @@ CREATE INDEX idx_historial_tabla_registro ON historial_cambio (tabla_afectada, r
 -- Datos iniciales
 INSERT INTO rol (nombre) VALUES ('ADMIN'), ('MIEMBRO'), ('PROFESOR'), ('RECEPCIONISTA'), ('PSR_TERMINAL');
 INSERT INTO tarifa (id, monto) VALUES (1, 4000);
-INSERT INTO configuracion_cola (id, personas_por_turno) VALUES (1, 1);
+-- minutos_margen_ingreso explicito y distinto del DEFAULT 60 de la columna: PSR abre el check-in
+-- automatico 45 minutos antes, o sea a las 18:15 para la clase de las 19:00. El DEFAULT se queda en
+-- 60 como valor de fabrica; esta fila es la configuracion de esta academia.
+-- personas_por_turno y minutos_visibilidad_pagos se quedan en 1, que es lo que PSR usa.
+INSERT INTO configuracion_cola (id, personas_por_turno, minutos_margen_ingreso) VALUES (1, 1, 45);
 INSERT INTO metodo_pago (nombre) VALUES ('EFECTIVO'), ('TRANSFERENCIA');
 
 -- Persona y usuario sentinel (id fijo 999999999) — objetivo: sp_eliminar_persona: conserva el hecho de registros necesarios

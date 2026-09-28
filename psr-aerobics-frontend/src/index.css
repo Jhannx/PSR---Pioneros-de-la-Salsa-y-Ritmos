@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+@theme {
+  /* Textos descriptivos de la TV. Bahnschrift viene con Windows 10/11; fuera de Windows cae a la del sistema. */
+  --font-desc: "Bahnschrift", "DIN Alternate", "Segoe UI", system-ui, sans-serif;
+}
+
 :root {
   color-scheme: dark;
 }

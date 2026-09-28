@@ -82,8 +82,10 @@ public class HistoricalDataSeeder implements ApplicationRunner {
     /** Lo que cuesta una clase en el historico. Coincide con la tarifa inicial de V1. */
     private static final BigDecimal FEE = new BigDecimal("4000");
 
-    private static final LocalTime CLASS_START = LocalTime.of(18, 0);
-    private static final LocalTime CLASS_END = LocalTime.of(19, 0);
+    // La franja real de PSR, la misma que siembra ProductionAccountsSeeder. Si no coincidieran, las
+    // sesiones del historico quedarian a una hora y el horario al que las ata createSession a otra.
+    private static final LocalTime CLASS_START = LocalTime.of(19, 0);
+    private static final LocalTime CLASS_END = LocalTime.of(20, 0);
 
     private final JdbcTemplate jdbc;
     private final PersonProcedureRepository personProcedureRepository;

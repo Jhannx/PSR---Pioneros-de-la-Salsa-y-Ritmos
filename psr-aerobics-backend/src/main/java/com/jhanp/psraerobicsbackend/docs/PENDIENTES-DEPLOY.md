@@ -107,8 +107,11 @@ Hoy están en DEBUG: llenan el disco y dejan las consultas (con sus valores) en 
 |---|---|---|
 | `POSTGRES_URL` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | los reales | no arranca |
 | `JWT_SECRET` | **Base64, ≥32 bytes**, distinto al de desarrollo | no arranca (con mensaje claro) |
-| `SEED_ENABLED` | `false` | 🔴 siembra cuentas con contraseña conocida |
+| `SEED_ENABLED` | `false` | (ya es el defecto desde el 28-09-2026) |
 | `SEED_HISTORICAL_ENABLED` | `false` | (ya es el defecto) |
+| `SEED_PRODUCTION_ENABLED` | `true` | (ya es el defecto) sin él no hay admin, terminales ni horarios |
+| `ADMIN_EMAIL` | el real | queda `adminpsraerobicos@gmail.com` |
+| `ADMIN_PASSWORD` | uno nuevo | 🔴 queda `adminrootpsraerobicos`, que está en el repositorio |
 | `CORS_ALLOWED_ORIGINS` | dominio del front | 🔴 quedan los localhost de Vite |
 | `FRONTEND_URL` | dominio del front | los enlaces de los correos apuntan a `localhost:5173` |
 | `EMAIL_PROVIDER` | `brevo` | usa SMTP de Mailtrap (sandbox) |
@@ -120,6 +123,25 @@ Hoy están en DEBUG: llenan el disco y dejan las consultas (con sus valores) en 
 
 > `JWT_SECRET` se genera con:
 > `[Convert]::ToBase64String((New-Object byte[] 64))` en PowerShell.
+
+### ⚠️ El `.env` de la raíz NO viaja al servidor
+
+En desarrollo esas variables salen del `.env` del proyecto, pero **no las lee ni Spring Boot ni el
+`.jar`**: las inyecta el plugin **EnvFile** (`net.ashald.envfile`) de IntelliJ, configurado sobre la
+run configuration `PsrAerobicsBackendApplication`. No hay ninguna dependencia dotenv en `pom.xml`.
+
+Consecuencias:
+
+- **Arrancando desde el botón Run del IDE**: cambiar el `.env` y reiniciar basta. No hay que
+  recompilar ni tocar código.
+- **`java -jar`, Docker, Render, Railway, systemd**: el `.env` se ignora por completo. Las variables
+  tienen que ser variables de entorno de verdad del proceso, o el panel de secretos del proveedor.
+  Copiar el `.env` al servidor no hace nada por sí solo.
+- **Los tests**: la run configuration de JUnit **no** tiene la extensión EnvFile, y por eso
+  `PsrAerobicsBackendApplicationTests` falla con `Could not resolve placeholder 'JWT_SECRET'` en
+  cualquier máquina.
+- **`.idea/workspace.xml` está en `.gitignore`**, así que esa configuración del plugin es local: en
+  otra máquina hay que volver a apuntarla al `.env` a mano.
 
 ---
 

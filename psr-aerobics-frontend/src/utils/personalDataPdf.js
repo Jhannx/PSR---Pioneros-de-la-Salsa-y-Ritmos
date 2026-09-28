@@ -19,6 +19,38 @@ const FOOTER_TEXT =
   "Generado desde tu cuenta en PSR Aeróbicos, en ejercicio del derecho de acceso a tus datos " +
   "personales (Ley 1581 de 2012, artículo 8, literal a).";
 
+// Nombres legibles de los tipos de consentimiento (ConsentType). Se aceptan el nombre del enum y el
+// valor de base de datos porque no está confirmado cuál de los dos serializa el backend.
+const CONSENT_TYPE_LABELS = {
+  DATA_PROCESSING: "Tratamiento de datos personales",
+  TRATAMIENTO_DATOS: "Tratamiento de datos personales",
+  VOLUNTARY_PARTICIPATION: "Participación voluntaria",
+  PARTICIPACION_VOLUNTARIA: "Participación voluntaria",
+  HEALTH_DATA: "Datos de salud",
+  DATOS_SALUD: "Datos de salud",
+  THIRD_PARTY_DATA: "Datos de terceros (contactos de emergencia)",
+  DATOS_TERCEROS: "Datos de terceros (contactos de emergencia)",
+};
+
+// Booleanos de estado vigente en ConsentStatusResponse → tipo de consentimiento.
+const CONSENT_STATUS_FIELDS = [
+  ["dataProcessing", "DATA_PROCESSING"],
+  ["voluntaryParticipation", "VOLUNTARY_PARTICIPATION"],
+  ["healthData", "HEALTH_DATA"],
+  ["thirdPartyData", "THIRD_PARTY_DATA"],
+];
+
+const CONSENT_MEDIUM_LABELS = {
+  DIGITAL: "digital",
+  PHYSICAL: "en físico",
+  FISICO: "en físico",
+};
+
+function consentLabel(type) {
+  if (!type) return null;
+  return CONSENT_TYPE_LABELS[type] || String(type);
+}
+
 // Fecha/hora completa, con año — a diferencia de `formatDateTimeShort` (utils/date.js), que omite
 // el año a propósito para pantallas de auditoría donde siempre es "este año". Un documento que la
 // persona puede guardar y volver a abrir meses después sí necesita el año.
@@ -238,26 +270,32 @@ export async function downloadPersonalDataPdf({ user, settled, fileName }) {
     // (cuentas viejas) y aun así tener otros consentimientos posteriores sí registrados (salud,
     // terceros) — antes esta rama se saltaba entera si `registrationConsentMissing` era `true`,
     // aunque hubiera más datos que sí valía la pena mostrar.
-    const entries = Array.isArray(c) ? c : Array.isArray(c.items) ? c.items : Array.isArray(c.consents) ? c.consents : null;
+    // Forma real (ConsentStatusResponse): un booleano por tipo con el estado vigente + `history`
+    // con cada registro (type, granted, policyVersion, medium, recordedAt).
+    const currentStatus = CONSENT_STATUS_FIELDS.filter(([key]) => typeof c[key] === "boolean");
+    if (currentStatus.length > 0) {
+      currentStatus.forEach(([key, type]) => field(consentLabel(type), c[key] ? "Otorgado" : "No otorgado"));
+      if (c.policyVersion) field("Versión vigente de la política", c.policyVersion);
+    }
+
+    const entries = Array.isArray(c) ? c
+      : Array.isArray(c.history) ? c.history
+      : Array.isArray(c.items) ? c.items
+      : Array.isArray(c.consents) ? c.consents
+      : null;
     if (entries && entries.length > 0) {
+      if (currentStatus.length > 0) note("Historial de registros:", { italic: false });
       entries.forEach((entry, index) => {
-        const type = entry.type || entry.consentType || entry.name || `Consentimiento ${index + 1}`;
+        const type = consentLabel(entry.type || entry.consentType || entry.name) || `Consentimiento ${index + 1}`;
         const granted = entry.granted ?? entry.accepted ?? entry.value;
-        const when = formatFullDateTime(entry.grantedAt || entry.date || entry.timestamp || entry.createdAt);
         const status = granted === false ? "No otorgado" : "Otorgado";
-        field(type, when ? `${status} — ${when}` : status);
+        const when = formatFullDateTime(entry.recordedAt || entry.grantedAt || entry.date || entry.createdAt);
+        const medium = CONSENT_MEDIUM_LABELS[entry.medium];
+        const details = [status, when, medium, entry.policyVersion && `política ${entry.policyVersion}`].filter(Boolean);
+        field(type, details.join(" — "));
       });
-    } else if (entries && entries.length === 0) {
-      if (!hadMissingFlag) note("No hay consentimientos registrados.", { italic: false });
-    } else {
-      // Objeto plano sin envoltura de array reconocible: se listan sus claves tal cual, mejor que
-      // no mostrar nada.
-      const keys = Object.keys(c).filter((k) => k !== "registrationConsentMissing");
-      if (keys.length > 0) {
-        keys.forEach((key) => field(key, typeof c[key] === "boolean" ? (c[key] ? "Sí" : "No") : String(c[key])));
-      } else if (!hadMissingFlag) {
-        note("Sin información adicional de consentimientos.", { italic: false });
-      }
+    } else if (currentStatus.length === 0 && !hadMissingFlag) {
+      note("No hay consentimientos registrados.", { italic: false });
     }
   } else {
     unavailable("consentimientos");

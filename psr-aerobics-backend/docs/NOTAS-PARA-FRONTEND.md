@@ -1201,11 +1201,35 @@ condicional) se crean estas cuentas si no existen:
 | `terminal1@psraerobicos.com` | PSR_TERMINAL | Equipo físico de entrada 1 |
 | `terminal2@psraerobicos.com` | PSR_TERMINAL | Equipo físico de entrada 2 |
 | `terminal3@psraerobicos.com` | PSR_TERMINAL | Equipo físico de entrada 3 |
-| `terminal4@psraerobicos.com` | PSR_TERMINAL | Equipo físico de entrada 4 |
-| `terminal5@psraerobicos.com` | PSR_TERMINAL | Equipo físico de entrada 5 |
 
-Ninguna tiene persona asociada — `fullName` vendrá `null` en el login. El front
-ya maneja eso: `PersonNames.fullName()` devuelve `null` si no hay persona.
+Eran cinco terminales hasta el 28-09-2026; PSR opera con tres. Como el seeder es
+idempotente y **no borra**, `terminal4` y `terminal5` siguen existiendo en
+cualquier base donde ya hubiera corrido: hay que desactivarlas a mano.
+
+Ninguna de estas cuatro tiene persona asociada — `fullName` vendrá `null` en el
+login. El front ya maneja eso: `PersonNames.fullName()` devuelve `null` si no hay
+persona.
+
+### Cuentas compartidas de mostrador
+
+El mismo seeder crea dos **personas** (no cuentas técnicas: estas sí llevan
+`persona`, porque tienen que poder entrar a la fila y que se les marque
+asistencia):
+
+| Documento | Nombre | Para qué |
+|---|---|---|
+| `INVITADO` | Invitado PSR | Quien entra sin cuenta propia y no hay tiempo de darlo de alta |
+| `MENOR` | Menor De Edad | Lo mismo, pero dejando constancia de que quien entró era menor, sin guardar ningún dato suyo |
+
+Aparecen en el buscador de personas como cualquier otra — tiene que ser así, el
+mostrador necesita encontrarlas. **No pueden iniciar sesión:** su `password_hash`
+no es bcrypt, así que ninguna contraseña hace match.
+
+> ⚠️ **Límite que el front debe reflejar:** solo cabe **una llegada por cuenta y
+> por sesión**. Si ya hay un invitado registrado en la clase en curso, el
+> check-in del segundo devuelve la misma llegada en vez de crear otra, y no
+> genera un segundo cobro. La pantalla no debería dar a entender que quedó
+> registrado un invitado nuevo.
 
 > **Acción front para la TV:** configurar el login de la terminal con el correo
 > `terminalN@psraerobicos.com` y su contraseña correspondiente.

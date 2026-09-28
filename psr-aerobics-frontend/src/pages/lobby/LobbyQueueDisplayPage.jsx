@@ -107,24 +107,24 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 1 }) {
           </button>
           <div className="min-w-0">
             <h1 className="text-xl font-bold text-white tracking-tight">PSR • Aeróbicos — Fila Pública</h1>
-            <p className="text-neutral-400 text-xs mt-0.5">
+            <p className="text-neutral-400 text-sm font-desc mt-0.5">
               Pioneros de la Salsa y Ritmos · Estado en tiempo real
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="flex items-center gap-4 ml-auto">
           <span
-            className={`flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-full border ${isConnected
+            className={`shrink-0 whitespace-nowrap flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-full border ${isConnected
                 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                 : "bg-amber-500/10 border-amber-500/30 text-amber-400"
               }`}
           >
             {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-            {isConnected ? "WS En Vivo" : "Desconectado"}
+            {isConnected ? "Conectado" : "Desconectado"}
           </span>
-          <div className="text-right text-neutral-400 text-xs font-semibold">
-            <div>{formatHeaderDate(now)}</div>
-            <div className="text-emerald-400 font-bold font-mono text-sm">{formattedTime}</div>
+          <div className="text-right whitespace-nowrap leading-tight">
+            <div className="text-neutral-200 text-base font-desc font-semibold">{formatHeaderDate(now)}</div>
+            <div className="text-emerald-400 text-3xl font-desc font-bold tabular-nums">{formattedTime}</div>
           </div>
         </div>
       </div>
@@ -133,18 +133,18 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 1 }) {
         {/* Sección 1: Pasando a Recepción (Llamados) */}
         <div className={`${sideSpan} bg-purple-950/20 border border-purple-500/40 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300`}>
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between gap-3 mb-2">
               <h2 className="text-lg font-bold text-purple-300">Pasar a Recepción</h2>
-              <span className="text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">
+              <span className="shrink-0 whitespace-nowrap text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">
                 {calledQueue.length} llamado(s)
               </span>
             </div>
-            <p className="text-purple-300/80 text-xs mb-3">
+            <p className="text-purple-300/80 text-sm font-desc mb-3">
               Acércate al mostrador de recepción para ingresar.
             </p>
 
             {calledQueue.length === 0 ? (
-              <div className="p-6 border border-dashed border-purple-500/20 rounded-2xl text-center text-purple-300/60 text-xs">
+              <div className="p-6 border border-dashed border-purple-500/20 rounded-2xl text-center text-purple-300/60 text-sm font-desc">
                 Esperando llamado de turno...
               </div>
             ) : (
@@ -177,13 +177,13 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 1 }) {
         {hasPrepaid && (
           <div className="lg:col-span-4 bg-emerald-950/20 border border-emerald-500/40 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300">
             <div>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between gap-3 mb-2">
                 <h2 className="text-lg font-bold text-emerald-300">Pasan Directo · Pagado en Recepción</h2>
-                <span className="text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                <span className="shrink-0 whitespace-nowrap text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
                   {prepaidList.length} persona(s)
                 </span>
               </div>
-              <p className="text-emerald-300/80 text-xs mb-3">
+              <p className="text-emerald-300/80 text-sm font-desc mb-3">
                 Solo quienes dejaron su clase pagada en recepción con anticipación. Ingresan directo a la sala.
               </p>
 
@@ -222,21 +222,21 @@ export default function LobbyQueueDisplayPage({ peoplePerTurn = 1 }) {
         {/* Sección 3: En Espera (Fila General) */}
         <div className={`${sideSpan} bg-neutral-900/60 border border-neutral-800 rounded-3xl p-4 flex flex-col justify-between shadow-xl transition-all duration-300`}>
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between gap-3 mb-2">
               <h2 className="text-lg font-bold text-white">En Espera (Fila General)</h2>
-              <span className="text-xs font-semibold text-neutral-400">
+              <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-neutral-400">
                 {remainingQueue.length} en espera
               </span>
             </div>
-            <p className="text-neutral-400 text-xs mb-3">
+            <p className="text-neutral-400 text-sm font-desc mb-3">
               Permanece en sala de espera hasta escuchar tu llamado.
             </p>
-            <p className="text-neutral-300 text-xs mb-3 bg-neutral-800/50 border border-neutral-700 rounded-xl px-3 py-2">
+            <p className="text-neutral-300 text-sm font-desc mb-3 bg-neutral-800/50 border border-neutral-700 rounded-xl px-3 py-2">
               <span className="font-bold text-white">¿Pagaste por transferencia?</span> Haz la fila normal: recepción verifica tu pago al llamarte.
             </p>
 
             {remainingQueue.length === 0 ? (
-              <div className="p-6 border border-dashed border-neutral-800 rounded-2xl text-center text-neutral-500 text-xs">
+              <div className="p-6 border border-dashed border-neutral-800 rounded-2xl text-center text-neutral-500 text-sm font-desc">
                 No hay más personas en la fila de espera.
               </div>
             ) : (
