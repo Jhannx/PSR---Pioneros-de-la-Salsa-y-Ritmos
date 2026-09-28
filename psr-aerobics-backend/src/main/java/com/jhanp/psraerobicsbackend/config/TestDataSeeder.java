@@ -42,13 +42,13 @@ import java.util.List;
  * pueda escribir en un INSERT. Sembrar desde Java, con el mismo PasswordEncoder que usa el login, es
  * la única forma de que las credenciales funcionen de verdad.
  * <p>
- * Solo corre con {@code app.seed.enabled=true}. Déjalo apagado fuera de tu máquina: crea cuentas con
+ * Solo corre con {@code app.seed.test.enabled=true}. Déjalo apagado fuera de tu máquina: crea cuentas con
  * contraseñas conocidas, que es exactamente lo que no quieres en un entorno real.
  * <p>
  * Es idempotente: si la persona ya existe, no la toca. Se puede reiniciar sin miedo.
  */
 @Component
-@ConditionalOnProperty(name = "app.seed.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.seed.test.enabled", havingValue = "true")
 // Antes que HistoricalDataSeeder, que necesita estas cuentas para atribuirle a alguien cada
 // asistencia y cada movimiento del historico.
 @Order(1)
@@ -130,7 +130,7 @@ public class TestDataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        log.warn("app.seed.enabled=true -> sembrando datos de prueba con contraseñas conocidas");
+        log.warn("app.seed.test.enabled=true -> sembrando datos de prueba con contraseñas conocidas");
 
         PEOPLE.forEach(this::seedPerson);
         seedTerminal();

@@ -108,7 +108,7 @@ public class HistoricalDataSeeder implements ApplicationRunner {
 
         if (!resolveActors()) {
             log.warn("No hay cuentas de admin o profesor: el historico no se siembra. "
-                    + "Arranca antes con app.seed.enabled=true");
+                    + "Arranca antes con app.seed.test.enabled=true");
             return;
         }
 

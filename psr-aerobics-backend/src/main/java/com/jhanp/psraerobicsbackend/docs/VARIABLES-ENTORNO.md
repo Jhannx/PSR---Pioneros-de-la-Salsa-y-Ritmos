@@ -127,12 +127,12 @@ escribir en ella.
 
 | Variable | Por defecto |
 |---|---|
-| `SEED_ENABLED` | `false` |
+| `SEED_TEST_ENABLED` | `false` |
 | `SEED_HISTORICAL_ENABLED` | `false` |
 
 Los dos vienen apagados: sin definir nada, un despliegue no siembra ni una cuenta de prueba.
 
-⚠️ **`SEED_ENABLED` venía en `true` hasta el 28-09-2026** y este documento avisaba de ello. Cambió a
+⚠️ **`SEED_TEST_ENABLED` venía en `true` hasta el 28-09-2026** y este documento avisaba de ello. Cambió a
 `false`: el único motivo del `true` era que en una base recién migrada no hubiera ningún ADMIN con el
 que entrar, y eso ahora lo cubre `ProductionAccountsSeeder`, que corre siempre y sin bandera. Si
 despliegas contra una base donde ya corrió el seed viejo, sus cuentas siguen ahí — hay que
@@ -152,10 +152,10 @@ Cinco días hábiles de operación ya transcurrida: 45 personas, ~30 asistencias
 abonos por adelantado, vueltos, reembolsos, una sesión cancelada con gente colgando y un método de
 pago desactivado. Sirve para revisar reportes, historiales y saldos sin fabricar los datos a mano.
 
-**Bandera aparte de `SEED_ENABLED` a propósito**, y apagada por defecto: las cuentas de prueba se
+**Bandera aparte de `SEED_TEST_ENABLED` a propósito**, y apagada por defecto: las cuentas de prueba se
 quieren casi siempre, y ciento cincuenta asistencias inventadas solo en el entorno de pruebas.
 
-**Depende de `SEED_ENABLED=true`**: necesita un ADMIN y un PROFESOR ya creados para poder atribuirles
+**Depende de `SEED_TEST_ENABLED=true`**: necesita un ADMIN y un PROFESOR ya creados para poder atribuirles
 cada asistencia y cada movimiento (la base lo exige, esas columnas son `NOT NULL`). Si no los
 encuentra, lo dice en el log y no escribe nada.
 
@@ -172,7 +172,7 @@ vuelve a hacerlo. Detalle de lo que carga, en `NOTAS-PARA-FRONTEND.md` (bloque 3
 - [ ] `FRONTEND_URL` al dominio real
 - [ ] `CORS_ALLOWED_ORIGINS` al dominio real, nunca `*`
 - [ ] `EMAIL_PROVIDER=brevo` con `BREVO_API_KEY` y remitente verificado
-- [ ] `SEED_ENABLED=false`
+- [ ] `SEED_TEST_ENABLED=false`
 - [ ] `SEED_HISTORICAL_ENABLED=false` (o sin definir)
 - [ ] `PRIVACY_POLICY_VERSION` coincide con la versión del documento realmente publicado
 

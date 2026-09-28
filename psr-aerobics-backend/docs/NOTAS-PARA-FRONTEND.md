@@ -376,7 +376,7 @@ Seeder aparte, **apagado por defecto**:
 SEED_HISTORICAL_ENABLED=true     # (app.seed.historical.enabled)
 ```
 
-Depende del seed de cuentas (`SEED_ENABLED=true`): necesita un ADMIN y un PROFESOR
+Depende del seed de cuentas (`SEED_TEST_ENABLED=true`): necesita un ADMIN y un PROFESOR
 existentes para atribuirles las asistencias y los movimientos. Si no los encuentra,
 avisa en el log y no escribe nada.
 
@@ -721,7 +721,7 @@ confirmar cambio de correo). Sin ella quedan apuntando a `localhost:5173`.
 decidido (ver el punto 1 de `pendiente-implementar-sistema.md`). En cuanto se decida,
 es el valor de su `VITE_API_URL`.
 
-Y el recordatorio de siempre para ese despliegue: `SEED_ENABLED=false` y
+Y el recordatorio de siempre para ese despliegue: `SEED_TEST_ENABLED=false` y
 `SEED_HISTORICAL_ENABLED=false` si es un entorno real; si es el de pruebas, al revés
 — con el histórico en `true` tendrán datos con los que probar.
 

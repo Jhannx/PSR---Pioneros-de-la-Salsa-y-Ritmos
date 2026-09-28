@@ -734,7 +734,7 @@ del huevo y la gallina: toda cuenta nace con rol MIEMBRO y ascender a alguien ex
 |---|---|---|---|
 | **1. Semilla del esquema** | `V1__INITIAL_DDL.sql` (final) | siempre, con Flyway | 5 roles, tarifa 4.000, config de cola, métodos EFECTIVO y TRANSFERENCIA, **persona/usuario sentinel 999999999**, **usuario SISTEMA 999999998** |
 | **2. Cuentas de "producción"** | `config/ProductionAccountsSeeder.java` | **siempre, sin bandera** | 1 admin + 5 terminales, **con contraseñas escritas en el código** |
-| **3. Datos de prueba** | `config/TestDataSeeder.java` (`@Order(1)`) | `app.seed.enabled` — **`true` por defecto** | 21 personas+cuentas (docs 1111–9999), cuenta `terminal@psraerobicos.com`, 5 horarios L–V |
+| **3. Datos de prueba** | `config/TestDataSeeder.java` (`@Order(1)`) | `app.seed.test.enabled` — **`true` por defecto** | 21 personas+cuentas (docs 1111–9999), cuenta `terminal@psraerobicos.com`, 5 horarios L–V |
 | **3b. Histórico de prueba** | `config/HistoricalDataSeeder.java` (`@Order(2)`) | `app.seed.historical.enabled` — **`false`** | 45 personas (docs 70001+), 5 días hábiles, ~150 asistencias, dinero, vueltos, reembolsos, una sesión cancelada |
 
 **La capa 1 es legítima y tiene que quedarse**: el sentinel y el usuario SISTEMA no son datos de
@@ -750,9 +750,9 @@ patrón predecible. **Corre sin bandera condicional**, y como es idempotente por
 borra la cuenta se vuelve a crear igual al reiniciar. Ese admin puede todo: dinero, auditoría, roles,
 eliminar personas.
 
-**b) El seed de prueba está encendido por defecto.** `app.seed.enabled=${SEED_ENABLED:true}`, con el
+**b) El seed de prueba está encendido por defecto.** `app.seed.test.enabled=${SEED_TEST_ENABLED:true}`, con el
 comentario *"NUNCA en producción: son credenciales conocidas"* justo encima. Desplegar sin acordarse
-de poner `SEED_ENABLED=false` siembra 21 cuentas **cuya contraseña es su número de documento**
+de poner `SEED_TEST_ENABLED=false` siembra 21 cuentas **cuya contraseña es su número de documento**
 (1111, 2222, 3333, 4444…) y cinco horarios de 18:00 a 20:00 que probablemente no son los reales.
 El histórico sí está apagado por defecto — que es como debería estar este.
 
@@ -765,8 +765,8 @@ base por ellos.
 
 | Opción | Qué implica | Costo | Riesgo |
 |---|---|---|---|
-| **A. Mínimo viable (recomendada para la v1)** | `SEED_ENABLED=false` en el entorno de producción; sacar las contraseñas del `ProductionAccountsSeeder` a variables de entorno y que **no cree nada si no están puestas**; cambiar la del admin ya desplegado | ~1 h | ninguno: no toca lógica |
-| **B. A + invertir el defecto** | además, `${SEED_ENABLED:false}`: hay que **encenderlo** a mano en desarrollo, no apagarlo en producción | +15 min | que un desarrollador arranque sin datos y no sepa por qué (se cubre con una línea en el README) |
+| **A. Mínimo viable (recomendada para la v1)** | `SEED_TEST_ENABLED=false` en el entorno de producción; sacar las contraseñas del `ProductionAccountsSeeder` a variables de entorno y que **no cree nada si no están puestas**; cambiar la del admin ya desplegado | ~1 h | ninguno: no toca lógica |
+| **B. A + invertir el defecto** | además, `${SEED_TEST_ENABLED:false}`: hay que **encenderlo** a mano en desarrollo, no apagarlo en producción | +15 min | que un desarrollador arranque sin datos y no sepa por qué (se cubre con una línea en el README) |
 | **C. B + admin por arranque único** | el admin no lo crea un seeder: se crea con una migración o un comando de arranque que **exige** `ADMIN_BOOTSTRAP_PASSWORD` y obliga a cambiarla al primer login | +2–3 h | más código nuevo a 5 días del cierre |
 | **D. Base limpia para producción** | recrear la base sin seeds y dar de alta todo a mano por la API | 2–4 h de trabajo manual + riesgo de teclear mal | **es el momento de hacerlo**: mientras la base se pueda recrear de cero, cuesta poco; con datos reales dentro, ya no |
 
@@ -941,7 +941,7 @@ Lo que hay que resolver **antes** de la salida, por orden de daño si no se hace
 
 | Prioridad | Qué | Costo | Toca lógica |
 |---|---|---|---|
-| 1 | Sacar las credenciales del código e invertir `SEED_ENABLED` (§11 opción B) | ~1 h | no |
+| 1 | Sacar las credenciales del código e invertir `SEED_TEST_ENABLED` (§11 opción B) | ~1 h | no |
 | 2 | Fijar la zona horaria del servidor y de la JVM | 10 min | no |
 | 3 | **Formatear la base y arrancar**, con la lista de `PENDIENTES-V2.md` §2 | medio día | no |
 | 4 | Probar el cobro con `DOCUMENTO`, `MANUAL` y `PROPIO`, y con una persona con crédito | 1 h | no |

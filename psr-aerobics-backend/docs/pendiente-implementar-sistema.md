@@ -149,5 +149,5 @@ físicamente, y por cuánto tiempo?
   antes.
 
 Y dos verificaciones operativas antes de producción, ya identificadas
-en la auditoría técnica: `SEED_ENABLED` debe quedar en `false`, y el
+en la auditoría técnica: `SEED_TEST_ENABLED` debe quedar en `false`, y el
 sitio debe servirse por HTTPS.

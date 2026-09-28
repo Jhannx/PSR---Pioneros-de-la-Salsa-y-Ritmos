@@ -13,26 +13,27 @@ pública**.
 
 ## 1. Bloqueantes — sin esto no se sale
 
-### 1.1 Apagar el seed de prueba 🔴
+### 1.1 Apagar el seed de prueba ✅ HECHO (28-09-2026)
 
-`app.seed.enabled=${SEED_ENABLED:true}` — **por defecto está encendido**. Si se despliega sin tocar
-nada, se siembran 21 cuentas cuya contraseña es su número de documento (1111, 2222, 3333, 4444…) y
-cinco horarios de prueba.
+`app.seed.test.enabled` pasó de `${SEED_TEST_ENABLED:true}` a `${SEED_TEST_ENABLED:false}`. Ya no hay que acordarse
+de nada: sin definir la variable, no se siembra ninguna cuenta de prueba.
 
-```bash
-SEED_ENABLED=false
-SEED_HISTORICAL_ENABLED=false   # ya es el valor por defecto, se pone explícito
-```
+Ver `AUDITORIA-BACKEND.md` §11 para limpiar una base donde el seed viejo ya corrió.
 
-Ver `AUDITORIA-BACKEND.md` §11 para las opciones de limpieza y su costo.
+### 1.2 Sacar las credenciales de admin del código ✅ HECHO (28-09-2026), con una desviación
 
-### 1.2 Sacar las credenciales de admin del código 🔴
+El correo y la contraseña del admin salieron del fuente a `ADMIN_EMAIL` / `ADMIN_PASSWORD`, y el
+seeder ganó su bandera (`SEED_PRODUCTION_ENABLED`). Las terminales bajaron de cinco a tres.
 
-`ProductionAccountsSeeder` crea el admin y las cinco terminales **con las contraseñas escritas en el
-fuente**, y corre siempre, sin bandera. Cualquiera que vea el repositorio tiene ADMIN.
+⚠️ **Lo que este documento pedía y NO se hizo:** "que el seeder no cree nada si no están puestas".
+Las variables conservan un valor por defecto. El motivo es que la alternativa es peor: un despliegue
+sin definirlas arrancaría **sin ningún admin**, y sin admin no hay por dónde entrar a crear las
+cuentas reales — el sistema queda cerrado por fuera y hay que ir a la base a mano. Una contraseña
+conocida se cambia desde la aplicación en el primer login; eso sí se recupera.
 
-Mínimo: pasarlas a variables de entorno y que el seeder **no cree nada si no están puestas**. Y
-cambiar la contraseña del admin en la base ya desplegada, si ya se desplegó.
+**Consecuencia que sigue viva:** si no se define `ADMIN_PASSWORD`, la contraseña es
+`adminrootpsraerobicos`, que está en el repositorio. Definirla en el hoster, o cambiarla en el primer
+login.
 
 ### 1.3 CORS al dominio real del front
 
@@ -54,18 +55,29 @@ comas si hace falta.
 La misma variable la usan `SecurityConfig` (HTTP) y `WebSocketConfig` (handshake STOMP), a propósito:
 se cambia en un solo sitio.
 
-### 1.4 Fijar la zona horaria 🔴
+### 1.4 Fijar la zona horaria ✅ HECHO (28-09-2026)
 
-No hay ninguna zona fijada: Java usa `ZoneId.systemDefault()` y el SQL usa `CURRENT_DATE`/`now()`.
-En local coinciden; en un servidor en UTC **el día cambia a las 7 de la tarde hora de Colombia**, y
-con clases de 6–9 pm eso cae justo en medio de la operación.
+Se fija en el código, no en una variable: la academia está en Colombia y no se va a mover.
+`PsrAerobicsBackendApplication` la establece en un bloque `static`, **antes** de
+`SpringApplication.run`.
 
-```bash
-TZ=America/Bogota
-JAVA_TOOL_OPTIONS="-Duser.timezone=America/Bogota"
+```java
+static { TimeZone.setDefault(TimeZone.getTimeZone("America/Bogota")); }
 ```
 
-Y comprobar en el servidor de base: `SHOW timezone;` → debe decir `America/Bogota`.
+Esto arregla las dos mitades a la vez, y la segunda no es obvia: el driver de PostgreSQL manda un
+`SET TIME ZONE` con la zona por defecto de la JVM al abrir cada conexión, así que `CURRENT_DATE` y
+`now()` **dentro de las funciones y los procedimientos** quedan también en hora de Colombia. Por eso
+va en un `static` y no en un `@PostConstruct`: si no, el pool podría abrir conexiones con la zona
+vieja antes de que corra.
+
+El riesgo que eliminaba: en un servidor en UTC el día cambiaba a las 7 de la tarde hora de Colombia
+— justo al empezar la clase.
+
+> Sigue siendo buena idea poner `TZ=America/Bogota` en el hoster, para el sistema operativo del
+> contenedor y para los logs. Pero ya no es lo que sostiene la corrección de las fechas.
+>
+> Y comprobar en el servidor de base: `SHOW timezone;`.
 
 ### 1.5 HTTPS obligatorio
 
@@ -76,28 +88,30 @@ sesión. Si va detrás de un proxy, añadir:
 server.forward-headers-strategy=framework
 ```
 
-### 1.6 Cerrar Swagger
+### 1.6 Cerrar Swagger ✅ HECHO (28-09-2026)
 
-`/swagger-ui/**` y `/v3/api-docs/**` están en `permitAll()`: con la app en internet, **toda la API
-queda documentada y navegable públicamente**, incluidos los endpoints de administración. Es un mapa
-gratis para cualquiera.
+Apagado por defecto en `application.properties`. No hay que poner nada en el hoster.
 
 ```properties
-springdoc.api-docs.enabled=false
-springdoc.swagger-ui.enabled=false
+springdoc.api-docs.enabled=${SWAGGER_ENABLED:false}
+springdoc.swagger-ui.enabled=${SWAGGER_ENABLED:false}
 ```
 
-(O dejarlo accesible solo desde la red interna / detrás de auth básica del proxy.)
+Para recuperarlo **en local**: `SWAGGER_ENABLED=true` en el `.env`.
 
-### 1.7 Bajar el ruido de los logs
+### 1.7 Bajar el ruido de los logs ✅ HECHO (28-09-2026)
 
 ```properties
-spring.jpa.show-sql=false
-logging.level.org.hibernate.SQL=INFO
+spring.jpa.show-sql=${SQL_LOG:false}
+spring.jpa.properties.hibernate.format_sql=${SQL_LOG:false}
+logging.level.org.hibernate.SQL=${SQL_LOG_LEVEL:INFO}
 logging.level.org.flywaydb=INFO
 ```
 
-Hoy están en DEBUG: llenan el disco y dejan las consultas (con sus valores) en el log.
+No era solo el disco: en DEBUG el log guardaba las consultas **con sus valores**, o sea documentos,
+correos y teléfonos de personas reales en un archivo que se rota y se envía a un agregador.
+
+Para depurar una consulta en local: `SQL_LOG=true` y `SQL_LOG_LEVEL=DEBUG` en el `.env`.
 
 ---
 
@@ -107,7 +121,7 @@ Hoy están en DEBUG: llenan el disco y dejan las consultas (con sus valores) en 
 |---|---|---|
 | `POSTGRES_URL` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | los reales | no arranca |
 | `JWT_SECRET` | **Base64, ≥32 bytes**, distinto al de desarrollo | no arranca (con mensaje claro) |
-| `SEED_ENABLED` | `false` | (ya es el defecto desde el 28-09-2026) |
+| `SEED_TEST_ENABLED` | `false` | (ya es el defecto desde el 28-09-2026) |
 | `SEED_HISTORICAL_ENABLED` | `false` | (ya es el defecto) |
 | `SEED_PRODUCTION_ENABLED` | `true` | (ya es el defecto) sin él no hay admin, terminales ni horarios |
 | `ADMIN_EMAIL` | el real | queda `adminpsraerobicos@gmail.com` |
@@ -119,7 +133,9 @@ Hoy están en DEBUG: llenan el disco y dejan las consultas (con sus valores) en 
 | `EMAIL_FROM_ADDRESS` | remitente **verificado en Brevo** | Brevo rechaza con 400 |
 | `EMAIL_FROM_NAME` | `PSR Aerobicos` | |
 | `PRIVACY_POLICY_VERSION` | `1.0` | |
-| `TZ` | `America/Bogota` | 🔴 ver 1.4 |
+| `TZ` | `America/Bogota` | recomendable, pero ya no bloquea: la zona se fija en el codigo (ver 1.4) |
+| `SWAGGER_ENABLED` | no ponerla | apagado por defecto; `true` solo en local |
+| `SQL_LOG` / `SQL_LOG_LEVEL` | no ponerlas | logs de SQL apagados por defecto; encender solo en local |
 
 > `JWT_SECRET` se genera con:
 > `[Convert]::ToBase64String((New-Object byte[] 64))` en PowerShell.
@@ -208,25 +224,30 @@ por defecto, así que solo importa si en alguna pantalla se usa `dangerouslySetI
 
 ---
 
-## 5. Datos reales pendientes de confirmar con el cliente
+## 5. Datos reales ✅ CONFIRMADOS Y APLICADOS (28-09-2026)
 
-**No tocar hasta confirmación.** Hoy la base arranca con valores de prueba:
+Esta sección decía "pendientes de confirmar" y listaba los horarios de prueba. Ya no: el cliente los
+confirmó y están sembrados.
 
-| Dato | Valor actual | Valor real (por confirmar) |
+| Dato | Valor real | Dónde vive |
 |---|---|---|
-| Tarifa | `4000` (`V1__INITIAL_DDL.sql`) | **4.000** — coincide, confirmar |
-| Horarios | L–V 18:00–19:00 y 19:00–20:00 (`TestDataSeeder`) | **lunes a jueves, 6 o 7 pm → 9 pm** |
+| Tarifa | **$4.000** | `V1__INITIAL_DDL.sql` — coincidía, no hubo que cambiar nada |
+| Horarios | **lunes a jueves, 19:00–20:00** | `ProductionAccountsSeeder.seedSchedules()` |
+| Margen de ingreso | **45 min** (check-in abre 18:15) | `V1__INITIAL_DDL.sql`, fila de `configuracion_cola` |
+| Personas por turno | 1 | `V1__INITIAL_DDL.sql` |
+| Visibilidad de pagos | 1 min | `V1__INITIAL_DDL.sql` |
 
-Dos notas sobre esto:
+Notas:
 
-- Los horarios de `TestDataSeeder` **desaparecen solos al poner `SEED_ENABLED=false`**: no hay que
-  borrarlos, solo no sembrarlos. Los reales se crean desde la app (`POST /api/horarios`), que además
-  genera sus sesiones al instante.
-- La tarifa sí vive en `V1` y se aplica siempre. Si el valor real es 4.000, no hay nada que hacer; si
-  cambia, se ajusta desde `PUT /api/tarifa` (queda auditado) y no tocando la migración.
-- Una clase de 6 a 9 pm es una franja de **tres horas**, no de una. Conviene confirmar si es una sola
-  sesión larga o varias seguidas, porque de eso depende cómo se configuran los horarios y a qué
-  sesión entra quien llega a las 8 (ver `fn_obtener_o_crear_sesion_del_momento`).
+- La duda de "¿6 a 9 pm es una franja de tres horas o varias?" quedó resuelta: es **una sola sesión
+  de una hora**, de 7 a 8. Viernes no hay clase.
+- Los horarios **ya no viven en `TestDataSeeder`**. Estaban ahí y eran el único dato de operación
+  real atado a una bandera que en producción debe estar apagada; se movieron al seeder de
+  producción. Apagar `SEED_TEST_ENABLED` ya no deja la agenda vacía.
+- `seedSchedules()` **siembra, no sincroniza**: crea el horario que falta y no toca los existentes,
+  porque cambiar la agenda es del admin desde `POST /api/horarios`. Cambiar la hora en el código
+  sobre una base ya sembrada **añadiría un segundo horario**, no movería el primero.
+- La tarifa se ajusta desde `PUT /api/tarifa` (queda auditado), no tocando la migración.
 
 ---
 
