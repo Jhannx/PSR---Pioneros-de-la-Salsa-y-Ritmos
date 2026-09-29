@@ -79,12 +79,38 @@ public class ProductionAccountsSeeder implements ApplicationRunner {
      * <b>Cambiar el correo no renombra al admin existente.</b> La siembra es idempotente por correo:
      * apuntar {@code ADMIN_EMAIL} a otra dirección sobre una base donde ya corrió crea un segundo
      * admin y deja el primero intacto, con su contraseña vieja.
+     * <p>
+     * <b>El default del placeholder no basta, y por eso estan los DEFAULT_ de abajo.</b>
+     * {@code ${VAR:defecto}} aplica el defecto solo cuando la propiedad <i>no existe</i>. Una variable
+     * presente pero vacia —{@code ADMIN_PASSWORD=} en un .env, que es lo natural al dejar un hueco
+     * para rellenar despues— resuelve a cadena vacia, no al defecto. El admin se creaba entonces con
+     * {@code encode("")} y el login con la contraseña conocida devolvia 401, sin nada en los logs que
+     * apuntara a la causa. Lo mismo un valor que quedo como {@code # comentario} porque el parser del
+     * .env no soporta comentarios al final de linea. {@link #orDefault} trata ambos casos como
+     * ausencia.
      */
-    @Value("${app.seed.production.admin-email:adminpsraerobicos@gmail.com}")
+    private static final String DEFAULT_ADMIN_EMAIL = "adminpsraerobicos@gmail.com";
+    private static final String DEFAULT_ADMIN_PASSWORD = "adminrootpsraerobicos";
+
+    @Value("${app.seed.production.admin-email:}")
     private String adminEmail;
 
-    @Value("${app.seed.production.admin-password:adminrootpsraerobicos}")
+    @Value("${app.seed.production.admin-password:}")
     private String adminPassword;
+
+    /**
+     * El valor configurado, o el de fabrica cuando lo configurado no sirve: nulo, en blanco, o un
+     * comentario que se cargo el parser del .env.
+     */
+    private static String orDefault(String configured, String fallback) {
+        if (configured == null) {
+            return fallback;
+        }
+
+        String trimmed = configured.trim();
+
+        return trimmed.isEmpty() || trimmed.startsWith("#") ? fallback : trimmed;
+    }
 
     /** Tres equipos físicos de entrada. Eran cinco; PSR opera con tres. */
     private static final int TERMINAL_COUNT = 3;
@@ -144,22 +170,36 @@ public class ProductionAccountsSeeder implements ApplicationRunner {
     }
 
     private void seedAdmin() {
-        if (userRepository.existsByEmail(adminEmail)) {
-            log.info("La cuenta de admin ya existe ({}); no se toca", adminEmail);
+        String email = orDefault(adminEmail, DEFAULT_ADMIN_EMAIL);
+        String password = orDefault(adminPassword, DEFAULT_ADMIN_PASSWORD);
+
+        // Que se uso y que no, porque es la diferencia entre "no puedo entrar" y "ya se por que":
+        // asi el arranque dice si la variable llego o si se cayo al valor de fabrica, sin imprimir
+        // ninguna contraseña.
+        if (password.equals(DEFAULT_ADMIN_PASSWORD)) {
+            log.warn("ADMIN_PASSWORD no llego (ausente o vacia): se usa la del repositorio. "
+                    + "Cambiala en el primer login.");
+        }
+
+        if (userRepository.existsByEmail(email)) {
+            // Importante cuando el login falla: la cuenta conserva la contraseña con la que nacio.
+            // Cambiar ADMIN_PASSWORD ahora no la actualiza; hay que cambiarla desde la aplicacion o
+            // borrar la fila y reiniciar.
+            log.info("La cuenta de admin ya existe ({}); no se toca, conserva su contraseña actual",
+                    email);
             return;
         }
 
         User admin = userRepository.saveAndFlush(User.builder()
-                .email(adminEmail)
-                .passwordHash(passwordEncoder.encode(adminPassword))
+                .email(email)
+                .passwordHash(passwordEncoder.encode(password))
                 .active(true)
                 .build());
         userRoleProcedureRepository.assign(admin.getId(), RoleName.ADMIN);
 
         // Solo el correo. La contraseña no se registra ni en WARN: los logs de produccion se
         // guardan, se envian a un agregador y los lee gente que no deberia poder entrar como admin.
-        log.warn("Cuenta de admin de producción creada: {}. Cambia su contraseña en el primer login.",
-                adminEmail);
+        log.warn("Cuenta de admin de producción creada: {}", email);
     }
 
     private void seedTerminals() {
