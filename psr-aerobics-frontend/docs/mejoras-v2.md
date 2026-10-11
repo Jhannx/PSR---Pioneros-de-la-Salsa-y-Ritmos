@@ -361,3 +361,22 @@ fila y recepción volvían al login cada hora. Para v1 se subió `jwt.expiration
 - **Ojo:** no activar el refresh con el token de 30 días. `scheduleProactiveRefresh` usa `setTimeout`, que en el
   navegador no acepta esperas de más de ~24,8 días: con 30 días dispararía la renovación de inmediato, en bucle.
   El token de acceso tiene que volver a ser corto antes de encender la bandera.
+
+## 16. Quitar el botón "Abonar N sesiones"
+
+**Anotado el 29-sep.** *Descripción pendiente.*
+
+Hoy hay dos botones con ese texto en `QueueRow.jsx`: el del excedente de un cobro ("Abonar {extraDays}
+sesión(es)") y el del vuelto pendiente ("Abonar {daysFromPending} sesión(es)"). Falta definir cuál (o
+ambos) se quita y qué opción queda en su lugar.
+
+## 17. Lobby: texto de "No pudimos ingresarte a la fila"
+
+**Anotado el 29-sep.** *Descripción pendiente.*
+
+El mensaje actual es "No pudimos ingresarte a la fila automáticamente. Pide en recepción que te agreguen."
+y aparece en `LobbyRegistrationPage.jsx` y también en `MemberRegistrationPage.jsx`.
+
+## 18. Historiales
+
+**Anotado el 29-sep.** *Descripción pendiente.*
